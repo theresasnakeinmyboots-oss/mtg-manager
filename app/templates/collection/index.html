@@ -1,0 +1,219 @@
+{% extends 'base.html' %}
+
+{% block title %}Collection Browser - MTG Manager{% endblock %}
+
+{% block content %}
+<div class="collection-page">
+    <div class="sidebar">
+        <h2>Filters & Import</h2>
+
+        <div class="import-section">
+            <button id="importBtn" class="btn btn-primary">Import CSV</button>
+        </div>
+
+        <form method="GET" class="filter-form">
+            <div class="filter-group">
+                <label>Search Name</label>
+                <input type="text" name="q" value="{{ search_q }}" placeholder="Card name...">
+            </div>
+
+            <div class="filter-group">
+                <label>Color</label>
+                <select name="color">
+                    <option value="">Any</option>
+                    <option value="W" {% if filter_color == 'W' %}selected{% endif %}>White</option>
+                    <option value="U" {% if filter_color == 'U' %}selected{% endif %}>Blue</option>
+                    <option value="B" {% if filter_color == 'B' %}selected{% endif %}>Black</option>
+                    <option value="R" {% if filter_color == 'R' %}selected{% endif %}>Red</option>
+                    <option value="G" {% if filter_color == 'G' %}selected{% endif %}>Green</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Card Type</label>
+                <select name="type">
+                    <option value="">Any</option>
+                    <option value="Creature" {% if filter_type == 'Creature' %}selected{% endif %}>Creature</option>
+                    <option value="Instant" {% if filter_type == 'Instant' %}selected{% endif %}>Instant</option>
+                    <option value="Sorcery" {% if filter_type == 'Sorcery' %}selected{% endif %}>Sorcery</option>
+                    <option value="Enchantment" {% if filter_type == 'Enchantment' %}selected{% endif %}>Enchantment</option>
+                    <option value="Artifact" {% if filter_type == 'Artifact' %}selected{% endif %}>Artifact</option>
+                    <option value="Land" {% if filter_type == 'Land' %}selected{% endif %}>Land</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Edition</label>
+                <input type="text" name="set" value="{{ filter_set }}" placeholder="Set code...">
+            </div>
+
+            <div class="filter-group">
+                <label>Condition</label>
+                <select name="condition">
+                    <option value="">Any</option>
+                    <option value="M" {% if filter_condition == 'M' %}selected{% endif %}>Mint</option>
+                    <option value="NM" {% if filter_condition == 'NM' %}selected{% endif %}>Near Mint</option>
+                    <option value="LP" {% if filter_condition == 'LP' %}selected{% endif %}>Lightly Played</option>
+                    <option value="PL" {% if filter_condition == 'PL' %}selected{% endif %}>Played</option>
+                    <option value="HP" {% if filter_condition == 'HP' %}selected{% endif %}>Heavily Played</option>
+                    <option value="D" {% if filter_condition == 'D' %}selected{% endif %}>Damaged</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>
+                    <input type="checkbox" name="foil" value="foil" {% if filter_foil == 'foil' %}checked{% endif %}>
+                    Foil Only
+                </label>
+            </div>
+
+            <div class="filter-group">
+                <label>Sort By</label>
+                <select name="sort">
+                    <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name</option>
+                    <option value="set" {% if sort_by == 'set' %}selected{% endif %}>Set</option>
+                    <option value="count" {% if sort_by == 'count' %}selected{% endif %}>Count (High to Low)</option>
+                </select>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Apply Filters</button>
+            <a href="/collection" class="btn btn-secondary">Clear</a>
+        </form>
+    </div>
+
+    <div class="main-content">
+        <div class="page-header">
+            <h1>Collection Browser</h1>
+            <p>Total cards: {{ total }}</p>
+        </div>
+
+        {% if cards %}
+        <div class="cards-grid">
+            {% for card in cards %}
+            <div class="card-item">
+                <div class="card-image">
+                    {% if card.image_uri %}
+                    <img src="{{ card.image_uri }}" alt="{{ card.name }}" loading="lazy">
+                    {% else %}
+                    <div class="no-image">No Image</div>
+                    {% endif %}
+                </div>
+                <div class="card-info">
+                    <h3><a href="/collection/{{ card.id }}">{{ card.name }}</a></h3>
+                    <p class="edition">{{ card.edition }} #{{ card.card_number }}</p>
+                    <p class="mana-cost">{{ card.mana_cost }}</p>
+                    <p class="type-line">{{ card.type_line }}</p>
+                    <div class="card-meta">
+                        <span class="count">×{{ card.count }}</span>
+                        <span class="condition">{{ card.condition }}</span>
+                        {% if card.foil %}
+                        <span class="foil">Foil</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="pagination">
+            {% if page > 1 %}
+            <a href="/collection?page={{ page - 1 }}&q={{ search_q }}&sort={{ sort_by }}" class="btn btn-secondary">← Previous</a>
+            {% endif %}
+            <span>Page {{ page }} of {{ (total + per_page - 1) // per_page }}</span>
+            {% if page * per_page < total %}
+            <a href="/collection?page={{ page + 1 }}&q={{ search_q }}&sort={{ sort_by }}" class="btn btn-secondary">Next →</a>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>No cards found. Import a CSV to get started.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div id="importModal" class="modal" style="display:none;">
+    <div class="modal-content">
+        <span class="modal-close">&times;</span>
+        <h2>Import Collection</h2>
+        <form id="importForm">
+            <input type="file" name="file" accept=".csv" required>
+            <button type="submit" class="btn btn-primary">Upload</button>
+        </form>
+        <div id="importStatus"></div>
+        <div id="progressContainer" style="display:none; margin-top: 1.5rem;">
+            <div class="progress-bar">
+                <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+            </div>
+            <p id="progressMessage" style="text-align: center; margin-top: 0.75rem; color: var(--text-secondary); font-size: 0.9rem;"></p>
+        </div>
+    </div>
+</div>
+
+<script>
+const importBtn = document.getElementById('importBtn');
+const modal = document.getElementById('importModal');
+const closeBtn = document.querySelector('.modal-close');
+
+importBtn.addEventListener('click', () => modal.style.display = 'block');
+closeBtn.addEventListener('click', () => modal.style.display = 'none');
+window.addEventListener('click', (e) => {
+    if (e.target === modal) modal.style.display = 'none';
+});
+
+document.getElementById('importForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const status = document.getElementById('importStatus');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressFill = document.getElementById('progressFill');
+    const progressMessage = document.getElementById('progressMessage');
+
+    status.innerHTML = '';
+    progressContainer.style.display = 'block';
+    progressFill.style.width = '0%';
+    progressMessage.textContent = 'Starting import...';
+
+    try {
+        const response = await fetch('/import', { method: 'POST', body: formData });
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let results = null;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const text = decoder.decode(value);
+            const lines = text.split('\n');
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+
+                        progressFill.style.width = data.progress + '%';
+                        progressMessage.textContent = data.message;
+
+                        if (data.status === 'complete') {
+                            results = data;
+                        }
+                    } catch (e) {
+                        // Skip invalid JSON
+                    }
+                }
+            }
+        }
+
+        if (results) {
+            progressContainer.style.display = 'none';
+            status.innerHTML = `<p class="success">✓ Imported ${results.inserted} cards, enriched ${results.enriched} (${results.skipped} duplicates)</p>`;
+            setTimeout(() => location.reload(), 1500);
+        }
+    } catch (err) {
+        progressContainer.style.display = 'none';
+        status.innerHTML = `<p class="error">✗ Error: ${err.message}</p>`;
+    }
+});
+</script>
+{% endblock %}

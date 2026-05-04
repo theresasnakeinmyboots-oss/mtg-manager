@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ card.name }} - MTG Manager{% endblock %}
+
+{% block content %}
+<div class="card-detail-page">
+    <a href="/collection" class="btn btn-secondary">← Back to Collection</a>
+
+    <div class="card-detail-container">
+        <div class="card-image-large">
+            {% if card.image_uri %}
+            <img src="{{ card.image_uri }}" alt="{{ card.name }}">
+            {% else %}
+            <div class="no-image-large">No Image Available</div>
+            {% endif %}
+        </div>
+
+        <div class="card-detail-info">
+            <h1>{{ card.name }}</h1>
+
+            <div class="detail-group">
+                <h3>Location in Collection</h3>
+                <p><strong>Edition:</strong> {{ card.edition }} {{ card.edition|format_set_symbol|safe }}</p>
+                <p><strong>Card Number:</strong> {{ card.card_number }}</p>
+                <p><strong>Count:</strong> {{ card.count }}</p>
+            </div>
+
+            <div class="detail-group">
+                <h3>Condition & Attributes</h3>
+                <p><strong>Condition:</strong> {{ card.condition }}</p>
+                <p><strong>Language:</strong> {{ card.language }}</p>
+                {% if card.foil %}
+                <p><strong>Foil:</strong> Yes</p>
+                {% endif %}
+                {% if card.signed %}
+                <p><strong>Signed:</strong> Yes</p>
+                {% endif %}
+                {% if card.artist_proof %}
+                <p><strong>Artist Proof:</strong> Yes</p>
+                {% endif %}
+                {% if card.altered_art %}
+                <p><strong>Altered Art:</strong> Yes</p>
+                {% endif %}
+                {% if card.misprint %}
+                <p><strong>Misprint:</strong> Yes</p>
+                {% endif %}
+                {% if card.promo %}
+                <p><strong>Promo:</strong> Yes</p>
+                {% endif %}
+                {% if card.textless %}
+                <p><strong>Textless:</strong> Yes</p>
+                {% endif %}
+            </div>
+
+            {% if card.my_price %}
+            <div class="detail-group">
+                <h3>Valuation</h3>
+                <p><strong>My Price:</strong> ${{ "%.2f"|format(card.my_price) }}</p>
+            </div>
+            {% endif %}
+
+            {% if card.scryfall_id %}
+            <div class="detail-group">
+                <h3>Card Data (from Scryfall)</h3>
+                <p><strong>Type:</strong> {{ card.type_line }}</p>
+                <p><strong>Mana Cost:</strong> <span class="mana-symbols">{{ card.mana_cost|format_mana_cost|safe }}</span></p>
+                {% if card.power and card.toughness %}
+                <p><strong>Power/Toughness:</strong> {{ card.power }}/{{ card.toughness }}</p>
+                {% endif %}
+                {% if card.rarity %}
+                <p><strong>Rarity:</strong> {{ card.rarity }}</p>
+                {% endif %}
+                {% if card.oracle_text %}
+                <div class="oracle-text">
+                    <h4>Oracle Text</h4>
+                    <p>{{ card.oracle_text }}</p>
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="alert alert-info">
+                <p>Card data not yet enriched.</p>
+                <button id="enrichCardBtn" class="btn btn-primary" style="margin-top: 1rem;">Enrich This Card</button>
+                <div id="enrichStatus" style="margin-top: 1rem;"></div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+const enrichCardBtn = document.getElementById('enrichCardBtn');
+if (enrichCardBtn) {
+    enrichCardBtn.addEventListener('click', async () => {
+        enrichCardBtn.disabled = true;
+        enrichCardBtn.textContent = 'Enriching...';
+        const enrichStatus = document.getElementById('enrichStatus');
+        enrichStatus.innerHTML = '';
+
+        try {
+            const collectionId = new URL(window.location).pathname.split('/').pop();
+            const response = await fetch(`/enrich-card/${collectionId}`, { method: 'POST' });
+            const data = await response.json();
+
+            if (data.success) {
+                enrichStatus.innerHTML = '<p class="success">✓ Card enriched! Reloading...</p>';
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                enrichStatus.innerHTML = `<p class="error">✗ Error: ${data.error}</p>`;
+                enrichCardBtn.disabled = false;
+                enrichCardBtn.textContent = 'Enrich This Card';
+            }
+        } catch (err) {
+            enrichStatus.innerHTML = `<p class="error">✗ Error: ${err.message}</p>`;
+            enrichCardBtn.disabled = false;
+            enrichCardBtn.textContent = 'Enrich This Card';
+        }
+    });
+}
+</script>
+{% endblock %}

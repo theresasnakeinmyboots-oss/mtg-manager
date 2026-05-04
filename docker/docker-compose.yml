@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: mtg-manager-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - data:/data
+    environment:
+      - DATA_DIR=/data
+      - FLASK_DEBUG=false
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:latest
+    container_name: mtg-manager-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  data:
+    driver: local

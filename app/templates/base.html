@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}MTG Collection Manager{% endblock %}</title>
+    <link rel="stylesheet" href="https://unpkg.com/keyrune@latest/css/keyrune.css">
+    <link rel="stylesheet" href="https://unpkg.com/mana@latest/mana.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="/" class="nav-brand">MTG Collection Manager</a>
+            <ul class="nav-menu">
+                <li><a href="/collection" class="nav-link">Collection</a></li>
+                <li><a href="#" class="nav-link disabled">Deck Builder</a></li>
+                <li><a href="#" class="nav-link disabled">Simulation</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <p>&copy; 2026 MTG Collection Manager</p>
+    </footer>
+</body>
+</html>

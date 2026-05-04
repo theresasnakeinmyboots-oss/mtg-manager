@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+
+{% block title %}Import CSV - MTG Manager{% endblock %}
+
+{% block content %}
+<div class="import-page">
+    <h1>Import Card Collection</h1>
+    <p>Upload a CSV file exported from Deckbox to add cards to your collection.</p>
+
+    <form method="POST" enctype="multipart/form-data" class="import-form">
+        <div class="form-group">
+            <label for="csvFile">CSV File</label>
+            <input type="file" id="csvFile" name="file" accept=".csv" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Import</button>
+    </form>
+</div>
+{% endblock %}
