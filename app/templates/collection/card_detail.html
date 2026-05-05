@@ -20,7 +20,7 @@
 
             <div class="detail-group">
                 <h3>Location in Collection</h3>
-                <p><strong>Edition:</strong> {% if card.set_code %}{{ card.set_code|format_set_symbol|safe }}{% endif %} {{ card.edition }}</p>
+                <p><strong>Edition:</strong> {% if card.set_code %}{{ card.set_code|format_set_symbol(card.rarity)|safe }} {% endif %}{{ card.edition }}</p>
                 <p><strong>Card Number:</strong> {{ card.card_number }}</p>
                 <p><strong>Count:</strong> {{ card.count }}</p>
             </div>

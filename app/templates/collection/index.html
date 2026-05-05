@@ -100,8 +100,8 @@
                 </div>
                 <div class="card-info">
                     <h3><a href="/collection/{{ card.id }}">{{ card.name }}</a></h3>
-                    <p class="edition">{{ card.edition }} #{{ card.card_number }}</p>
-                    <p class="mana-cost">{{ card.mana_cost }}</p>
+                    <p class="edition">{% if card.set_code %}{{ card.set_code|format_set_symbol(card.rarity)|safe }} {% endif %}{{ card.edition }} #{{ card.card_number }}</p>
+                    <p class="mana-cost">{{ card.mana_cost|format_mana_cost|safe }}</p>
                     <p class="type-line">{{ card.type_line }}</p>
                     <div class="card-meta">
                         <span class="count">×{{ card.count }}</span>

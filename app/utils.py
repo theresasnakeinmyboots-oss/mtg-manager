@@ -28,52 +28,66 @@ SET_CODE_MAP = {
     'UNH': 'unh', 'UNM': 'unm', 'UGL': 'ugl',
 }
 
-# Mana symbol mapping
-MANA_SYMBOL_MAP = {
-    '{0}': '0', '{1}': '1', '{2}': '2', '{3}': '3', '{4}': '4', '{5}': '5',
-    '{6}': '6', '{7}': '7', '{8}': '8', '{9}': '9', '{10}': '10',
-    '{W}': 'w', '{U}': 'u', '{B}': 'b', '{R}': 'r', '{G}': 'g',
-    '{WU}': 'wu', '{WB}': 'wb', '{WR}': 'wr', '{WG}': 'wg',
-    '{UB}': 'ub', '{UR}': 'ur', '{UG}': 'ug',
-    '{BR}': 'br', '{BG}': 'bg', '{RG}': 'rg',
-    '{WUB}': 'wub', '{WUR}': 'wur', '{WUG}': 'wug', '{WBR}': 'wbr',
-    '{WBG}': 'wbg', '{WRG}': 'wrg', '{UBR}': 'ubr', '{UBG}': 'ubg',
-    '{URG}': 'urg', '{BRG}': 'brg', '{WUBRG}': 'wubrg',
-    '{X}': 'x', '{S}': 's', '{P}': 'p',
-}
+def _symbol_to_ms_class(symbol: str) -> str:
+    """
+    Convert a single Scryfall mana symbol (without braces, uppercased) to
+    the Mana library CSS class string.
+
+    Scryfall uses slash notation for hybrid/Phyrexian: W/U, 2/W, W/P.
+    The Mana library uses concatenated lowercase: wu, 2w, wp.
+    All casting-cost symbols get ms-cost for the colored circle.
+    """
+    # Strip braces and uppercase
+    inner = symbol.strip('{}').upper()
+
+    # Generic numeric (0-20) and X, Y, Z, C, S
+    if re.match(r'^(\d+|X|Y|Z|C|S)$', inner):
+        return f'ms ms-{inner.lower()} ms-cost'
+
+    # Single color
+    if inner in ('W', 'U', 'B', 'R', 'G'):
+        return f'ms ms-{inner.lower()} ms-cost'
+
+    # Hybrid / Phyrexian: Scryfall format W/U, W/P, 2/W
+    if '/' in inner:
+        parts = inner.split('/')
+        code = ''.join(p.lower() for p in parts)
+        return f'ms ms-{code} ms-cost'
+
+    # Five-color and other multi-letter codes (WUBRG etc.)
+    return f'ms ms-{inner.lower()} ms-cost'
+
 
 def format_mana_cost(mana_cost: str) -> str:
-    """Convert mana cost string to HTML with Keyrune symbols."""
+    """Convert a Scryfall mana cost string to HTML with colored Mana symbols."""
     if not mana_cost:
         return ''
 
-    # Split by mana symbols (e.g., "{W}{U}{2}" -> ["{W}", "{U}", "{2}"])
-    symbols = re.findall(r'\{[^}]+\}', mana_cost.upper())
-    html = []
+    symbols = re.findall(r'\{[^}]+\}', mana_cost)
+    return ''.join(f'<i class="{_symbol_to_ms_class(s)}"></i>' for s in symbols)
 
-    for symbol in symbols:
-        keyrune_code = MANA_SYMBOL_MAP.get(symbol.upper())
-        if keyrune_code:
-            html.append(f'<i class="ms ms-{keyrune_code}"></i>')
-        else:
-            html.append(symbol)
+RARITY_CLASS_MAP = {
+    'COMMON': 'ss-common',
+    'UNCOMMON': 'ss-uncommon',
+    'RARE': 'ss-rare',
+    'MYTHIC': 'ss-mythic',
+    'BONUS': 'ss-mythic',
+    'SPECIAL': 'ss-rare',
+}
 
-    return ''.join(html)
-
-def format_set_symbol(set_code: str) -> str:
-    """Convert set code to Keyrune set symbol."""
+def format_set_symbol(set_code: str, rarity: str = '') -> str:
+    """Convert set code to a Keyrune set symbol, optionally coloured by rarity."""
     if not set_code:
         return ''
 
-    upper_code = set_code.upper()
-    keyrune_code = SET_CODE_MAP.get(upper_code)
+    lower_code = SET_CODE_MAP.get(set_code.upper(), set_code.lower())
+    rarity_class = RARITY_CLASS_MAP.get((rarity or '').upper(), '')
 
-    if keyrune_code:
-        return f'<i class="ss ss-{keyrune_code}"></i>'
+    classes = f'ss ss-{lower_code}'
+    if rarity_class:
+        classes += f' {rarity_class}'
 
-    # Fallback: try lowercase version for unmapped codes
-    lower_code = upper_code.lower()
-    return f'<i class="ss ss-{lower_code}"></i>'
+    return f'<i class="{classes}"></i>'
 
 def format_color_symbols(colors: str) -> str:
     """Convert color array to colored dots."""

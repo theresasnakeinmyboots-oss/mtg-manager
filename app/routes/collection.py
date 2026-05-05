@@ -72,6 +72,8 @@ def browse():
                COALESCE(k.colors, '[]') as colors,
                COALESCE(k.image_uri_small, '') as image_uri,
                COALESCE(k.mana_cost, '') as mana_cost,
+               COALESCE(k.set_code, '') as set_code,
+               COALESCE(k.rarity, '') as rarity,
                SUM(c.count) as total_count
         FROM collection c
         LEFT JOIN cards k ON c.card_id = k.id
