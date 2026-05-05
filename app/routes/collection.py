@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify, Response
+from flask import Blueprint, render_template, request, jsonify, Response, send_file
 from app.database import get_db
 from app.scryfall import ScryfallClient
 from app.importer import import_csv
@@ -9,6 +9,10 @@ import config
 import csv
 
 collection_bp = Blueprint('collection', __name__, url_prefix='/')
+
+@collection_bp.route('/test-keyrune')
+def test_keyrune():
+    return send_file(Path(__file__).parent.parent.parent / 'test_keyrune.html')
 
 @collection_bp.route('/')
 def index():
@@ -133,7 +137,8 @@ def card_detail(card_id):
                COALESCE(k.image_uri_normal, '') as image_uri,
                COALESCE(k.type_line, '') as type_line,
                COALESCE(k.mana_cost, '') as mana_cost,
-               COALESCE(k.scryfall_id, '') as scryfall_id
+               COALESCE(k.scryfall_id, '') as scryfall_id,
+               COALESCE(k.set_code, '') as set_code
         FROM collection c
         LEFT JOIN cards k ON c.card_id = k.id
         WHERE c.name = ? AND c.edition = ? AND c.condition = ? AND c.foil = ?

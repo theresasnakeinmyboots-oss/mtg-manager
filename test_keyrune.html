@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Keyrune Font Test</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/keyrune@latest/css/keyrune.css">
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #f0f0f0;
+            padding: 20px;
+        }
+        h1 { margin-top: 0; }
+        .symbol-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .symbol-box {
+            background: white;
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .symbol-box i {
+            display: block;
+            font-size: 48px;
+            margin-bottom: 10px;
+            min-height: 50px;
+        }
+        .symbol-name {
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>Keyrune Set Symbol Test</h1>
+    <p>If the symbols don't appear, the font didn't load. Check browser console.</p>
+
+    <h2>Sample Set Codes:</h2>
+    <div class="symbol-grid">
+        <div class="symbol-box">
+            <i class="ss ss-lea"></i>
+            <div class="symbol-name">LEA (Alpha)</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ss ss-leb"></i>
+            <div class="symbol-name">LEB (Beta)</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ss ss-tdc"></i>
+            <div class="symbol-name">TDC (Tarkir)</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ss ss-war"></i>
+            <div class="symbol-name">WAR (War)</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ss ss-znr"></i>
+            <div class="symbol-name">ZNR (Zendikar)</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ss ss-one"></i>
+            <div class="symbol-name">ONE (Phyrexia)</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ss ss-m20"></i>
+            <div class="symbol-name">M20 (Core 2020)</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ss ss-dom"></i>
+            <div class="symbol-name">DOM (Dominaria)</div>
+        </div>
+    </div>
+
+    <h2>Mana Symbols Test:</h2>
+    <link rel="stylesheet" href="static/mana.css">
+    <div class="symbol-grid">
+        <div class="symbol-box">
+            <i class="ms ms-w"></i>
+            <div class="symbol-name">White</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ms ms-u"></i>
+            <div class="symbol-name">Blue</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ms ms-b"></i>
+            <div class="symbol-name">Black</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ms ms-r"></i>
+            <div class="symbol-name">Red</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ms ms-g"></i>
+            <div class="symbol-name">Green</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ms ms-c"></i>
+            <div class="symbol-name">Colorless</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ms ms-2"></i>
+            <div class="symbol-name">2 Generic</div>
+        </div>
+        <div class="symbol-box">
+            <i class="ms ms-x"></i>
+            <div class="symbol-name">X</div>
+        </div>
+    </div>
+</body>
+</html>
