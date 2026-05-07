@@ -4,132 +4,105 @@
 
 {% block content %}
 <div class="collection-page">
-    <div class="sidebar">
-        <h2>Filters & Import</h2>
 
-        <div class="import-section">
-            <button id="importBtn" class="btn btn-primary">Import CSV</button>
+    <div class="collection-toolbar">
+        <div class="toolbar-left">
+            <span class="total-count">{{ total }} card{% if total != 1 %}s{% endif %}</span>
+            <form method="GET" class="search-form">
+                <input type="hidden" name="sort" value="{{ sort_by }}">
+                <input type="hidden" name="color" value="{{ filter_color }}">
+                <input type="hidden" name="type" value="{{ filter_type }}">
+                <input type="hidden" name="set" value="{{ filter_set }}">
+                <input type="hidden" name="condition" value="{{ filter_condition }}">
+                {% if filter_foil %}<input type="hidden" name="foil" value="{{ filter_foil }}">{% endif %}
+                <input type="text" name="q" value="{{ search_q }}" placeholder="Search cards…" class="search-input">
+            </form>
         </div>
+        <div class="toolbar-right">
+            <button id="filterToggle" class="btn btn-secondary btn-sm">Filters{% if filter_color or filter_type or filter_set or filter_condition or filter_foil %} ●{% endif %}</button>
+            <select name="sort" class="sort-select" onchange="applySort(this.value)">
+                <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name</option>
+                <option value="set" {% if sort_by == 'set' %}selected{% endif %}>Set</option>
+                <option value="count" {% if sort_by == 'count' %}selected{% endif %}>Count ↓</option>
+            </select>
+            <button id="importBtn" class="btn btn-primary btn-sm">Import CSV</button>
+        </div>
+    </div>
 
-        <form method="GET" class="filter-form">
-            <div class="filter-group">
-                <label>Search Name</label>
-                <input type="text" name="q" value="{{ search_q }}" placeholder="Card name...">
-            </div>
-
-            <div class="filter-group">
-                <label>Color</label>
-                <select name="color">
-                    <option value="">Any</option>
-                    <option value="W" {% if filter_color == 'W' %}selected{% endif %}>White</option>
-                    <option value="U" {% if filter_color == 'U' %}selected{% endif %}>Blue</option>
-                    <option value="B" {% if filter_color == 'B' %}selected{% endif %}>Black</option>
-                    <option value="R" {% if filter_color == 'R' %}selected{% endif %}>Red</option>
-                    <option value="G" {% if filter_color == 'G' %}selected{% endif %}>Green</option>
-                </select>
-            </div>
-
-            <div class="filter-group">
-                <label>Card Type</label>
-                <select name="type">
-                    <option value="">Any</option>
-                    <option value="Creature" {% if filter_type == 'Creature' %}selected{% endif %}>Creature</option>
-                    <option value="Instant" {% if filter_type == 'Instant' %}selected{% endif %}>Instant</option>
-                    <option value="Sorcery" {% if filter_type == 'Sorcery' %}selected{% endif %}>Sorcery</option>
-                    <option value="Enchantment" {% if filter_type == 'Enchantment' %}selected{% endif %}>Enchantment</option>
-                    <option value="Artifact" {% if filter_type == 'Artifact' %}selected{% endif %}>Artifact</option>
-                    <option value="Land" {% if filter_type == 'Land' %}selected{% endif %}>Land</option>
-                </select>
-            </div>
-
-            <div class="filter-group">
-                <label>Edition</label>
-                <input type="text" name="set" value="{{ filter_set }}" placeholder="Set code...">
-            </div>
-
-            <div class="filter-group">
-                <label>Condition</label>
-                <select name="condition">
-                    <option value="">Any</option>
-                    <option value="M" {% if filter_condition == 'M' %}selected{% endif %}>Mint</option>
-                    <option value="NM" {% if filter_condition == 'NM' %}selected{% endif %}>Near Mint</option>
-                    <option value="LP" {% if filter_condition == 'LP' %}selected{% endif %}>Lightly Played</option>
-                    <option value="PL" {% if filter_condition == 'PL' %}selected{% endif %}>Played</option>
-                    <option value="HP" {% if filter_condition == 'HP' %}selected{% endif %}>Heavily Played</option>
-                    <option value="D" {% if filter_condition == 'D' %}selected{% endif %}>Damaged</option>
-                </select>
-            </div>
-
-            <div class="filter-group">
-                <label>
-                    <input type="checkbox" name="foil" value="foil" {% if filter_foil == 'foil' %}checked{% endif %}>
-                    Foil Only
-                </label>
-            </div>
-
-            <div class="filter-group">
-                <label>Sort By</label>
-                <select name="sort">
-                    <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name</option>
-                    <option value="set" {% if sort_by == 'set' %}selected{% endif %}>Set</option>
-                    <option value="count" {% if sort_by == 'count' %}selected{% endif %}>Count (High to Low)</option>
-                </select>
-            </div>
-
-            <button type="submit" class="btn btn-primary">Apply Filters</button>
-            <a href="/collection" class="btn btn-secondary">Clear</a>
+    <div id="filterPanel" class="filter-panel" style="display:none;">
+        <form method="GET" class="filter-form-inline">
+            <input type="hidden" name="q" value="{{ search_q }}">
+            <input type="hidden" name="sort" value="{{ sort_by }}">
+            <select name="color">
+                <option value="">Any colour</option>
+                <option value="W" {% if filter_color == 'W' %}selected{% endif %}>White</option>
+                <option value="U" {% if filter_color == 'U' %}selected{% endif %}>Blue</option>
+                <option value="B" {% if filter_color == 'B' %}selected{% endif %}>Black</option>
+                <option value="R" {% if filter_color == 'R' %}selected{% endif %}>Red</option>
+                <option value="G" {% if filter_color == 'G' %}selected{% endif %}>Green</option>
+            </select>
+            <select name="type">
+                <option value="">Any type</option>
+                <option value="Creature" {% if filter_type == 'Creature' %}selected{% endif %}>Creature</option>
+                <option value="Instant" {% if filter_type == 'Instant' %}selected{% endif %}>Instant</option>
+                <option value="Sorcery" {% if filter_type == 'Sorcery' %}selected{% endif %}>Sorcery</option>
+                <option value="Enchantment" {% if filter_type == 'Enchantment' %}selected{% endif %}>Enchantment</option>
+                <option value="Artifact" {% if filter_type == 'Artifact' %}selected{% endif %}>Artifact</option>
+                <option value="Land" {% if filter_type == 'Land' %}selected{% endif %}>Land</option>
+            </select>
+            <input type="text" name="set" value="{{ filter_set }}" placeholder="Set code…">
+            <select name="condition">
+                <option value="">Any condition</option>
+                <option value="M" {% if filter_condition == 'M' %}selected{% endif %}>Mint</option>
+                <option value="NM" {% if filter_condition == 'NM' %}selected{% endif %}>Near Mint</option>
+                <option value="LP" {% if filter_condition == 'LP' %}selected{% endif %}>Lightly Played</option>
+                <option value="PL" {% if filter_condition == 'PL' %}selected{% endif %}>Played</option>
+                <option value="HP" {% if filter_condition == 'HP' %}selected{% endif %}>Heavily Played</option>
+                <option value="D" {% if filter_condition == 'D' %}selected{% endif %}>Damaged</option>
+            </select>
+            <label class="foil-check"><input type="checkbox" name="foil" value="foil" {% if filter_foil %}checked{% endif %}> Foil only</label>
+            <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+            <a href="/collection" class="btn btn-secondary btn-sm">Clear</a>
         </form>
     </div>
 
-    <div class="main-content">
-        <div class="page-header">
-            <h1>Collection Browser</h1>
-            <p>Total cards: {{ total }}</p>
-        </div>
-
-        {% if cards %}
-        <div class="cards-grid">
-            {% for card in cards %}
-            <div class="card-item">
-                <div class="card-image">
-                    {% if card.image_uri %}
-                    <img src="{{ card.image_uri }}" alt="{{ card.name }}" loading="lazy">
-                    {% else %}
-                    <div class="no-image">No Image</div>
-                    {% endif %}
-                </div>
-                <div class="card-info">
-                    <h3><a href="/collection/{{ card.id }}">{{ card.name }}</a></h3>
-                    <p class="edition">{% if card.set_code %}{{ card.set_code|format_set_symbol(card.rarity)|safe }} {% endif %}{{ card.edition }} #{{ card.card_number }}</p>
-                    <p class="mana-cost">{{ card.mana_cost|format_mana_cost|safe }}</p>
-                    <p class="type-line">{{ card.type_line }}</p>
-                    <div class="card-meta">
-                        <span class="count">×{{ card.count }}</span>
-                        <span class="condition">{{ card.condition }}</span>
-                        {% if card.foil %}
-                        <span class="foil">Foil</span>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-
-        <div class="pagination">
-            {% if page > 1 %}
-            <a href="/collection?page={{ page - 1 }}&q={{ search_q }}&sort={{ sort_by }}" class="btn btn-secondary">← Previous</a>
+    {% if cards %}
+    <div class="cards-grid-tight">
+        {% for card in cards %}
+        <a href="/collection/{{ card.id }}" class="card-thumb" title="{{ card.name }}{% if card.foil %} ✦{% endif %}">
+            {% if card.image_uri %}
+            <img src="{{ card.image_uri }}" alt="{{ card.name }}" loading="lazy">
+            {% else %}
+            <div class="no-image-thumb">{{ card.name }}</div>
             {% endif %}
-            <span>Page {{ page }} of {{ (total + per_page - 1) // per_page }}</span>
-            {% if page * per_page < total %}
-            <a href="/collection?page={{ page + 1 }}&q={{ search_q }}&sort={{ sort_by }}" class="btn btn-secondary">Next →</a>
+            {% if card.count > 1 %}
+            <span class="thumb-count">×{{ card.count }}</span>
             {% endif %}
-        </div>
-        {% else %}
-        <div class="empty-state">
-            <p>No cards found. Import a CSV to get started.</p>
-        </div>
+        </a>
+        {% endfor %}
+    </div>
+
+    <div class="pagination">
+        {% if page > 1 %}
+        <a href="?page={{ page - 1 }}&q={{ search_q }}&sort={{ sort_by }}&color={{ filter_color }}&type={{ filter_type }}&set={{ filter_set }}&condition={{ filter_condition }}{% if filter_foil %}&foil=foil{% endif %}" class="btn btn-secondary">← Prev</a>
+        {% endif %}
+        <span>Page {{ page }} of {{ ((total - 1) // per_page) + 1 }}</span>
+        {% if page * per_page < total %}
+        <a href="?page={{ page + 1 }}&q={{ search_q }}&sort={{ sort_by }}&color={{ filter_color }}&type={{ filter_type }}&set={{ filter_set }}&condition={{ filter_condition }}{% if filter_foil %}&foil=foil{% endif %}" class="btn btn-secondary">Next →</a>
         {% endif %}
     </div>
+
+    {% else %}
+    <div class="empty-state">
+        {% if search_q or filter_color or filter_type or filter_set or filter_condition or filter_foil %}
+        <p>No cards match your filters. <a href="/collection">Clear filters</a></p>
+        {% else %}
+        <p>Your collection is empty.</p>
+        <button id="importBtnEmpty" class="btn btn-primary" style="margin-top:1rem;">Import CSV to get started</button>
+        {% endif %}
+    </div>
+    {% endif %}
+
 </div>
 
 <div id="importModal" class="modal" style="display:none;">
@@ -145,20 +118,38 @@
             <div class="progress-bar">
                 <div id="progressFill" class="progress-fill" style="width: 0%"></div>
             </div>
-            <p id="progressMessage" style="text-align: center; margin-top: 0.75rem; color: var(--text-secondary); font-size: 0.9rem;"></p>
+            <p id="progressMessage" style="text-align:center; margin-top:0.75rem; color:var(--text-secondary); font-size:0.9rem;"></p>
         </div>
     </div>
 </div>
 
 <script>
-const importBtn = document.getElementById('importBtn');
-const modal = document.getElementById('importModal');
-const closeBtn = document.querySelector('.modal-close');
+// Filter panel toggle
+document.getElementById('filterToggle').addEventListener('click', () => {
+    const p = document.getElementById('filterPanel');
+    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+});
 
-importBtn.addEventListener('click', () => modal.style.display = 'block');
-closeBtn.addEventListener('click', () => modal.style.display = 'none');
-window.addEventListener('click', (e) => {
-    if (e.target === modal) modal.style.display = 'none';
+// Sort dropdown
+function applySort(val) {
+    const url = new URL(window.location);
+    url.searchParams.set('sort', val);
+    url.searchParams.set('page', '1');
+    window.location = url;
+}
+
+// Import modal
+const modal = document.getElementById('importModal');
+function openImport() { modal.style.display = 'block'; }
+document.getElementById('importBtn').addEventListener('click', openImport);
+const emptyBtn = document.getElementById('importBtnEmpty');
+if (emptyBtn) emptyBtn.addEventListener('click', openImport);
+document.querySelector('.modal-close').addEventListener('click', () => modal.style.display = 'none');
+window.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+
+// Search on enter (form submits naturally, this just ensures it)
+document.querySelector('.search-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') e.target.closest('form').submit();
 });
 
 document.getElementById('importForm').addEventListener('submit', async (e) => {
@@ -183,25 +174,15 @@ document.getElementById('importForm').addEventListener('submit', async (e) => {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-
-            const text = decoder.decode(value);
-            const lines = text.split('\n');
-
+            const lines = decoder.decode(value).split('\n');
             for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    try {
-                        const data = JSON.parse(line.slice(6));
-
-                        progressFill.style.width = data.progress + '%';
-                        progressMessage.textContent = data.message;
-
-                        if (data.status === 'complete') {
-                            results = data;
-                        }
-                    } catch (e) {
-                        // Skip invalid JSON
-                    }
-                }
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const data = JSON.parse(line.slice(6));
+                    progressFill.style.width = data.progress + '%';
+                    progressMessage.textContent = data.message;
+                    if (data.status === 'complete') results = data;
+                } catch (_) {}
             }
         }
 

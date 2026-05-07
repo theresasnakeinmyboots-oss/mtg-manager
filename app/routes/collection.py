@@ -70,7 +70,7 @@ def browse():
         SELECT MIN(c.id) as id, c.name, c.edition, c.condition, SUM(c.count) as count, c.foil, c.card_number,
                COALESCE(k.type_line, '') as type_line,
                COALESCE(k.colors, '[]') as colors,
-               COALESCE(k.image_uri_small, '') as image_uri,
+               COALESCE(k.image_uri_normal, '') as image_uri,
                COALESCE(k.mana_cost, '') as mana_cost,
                COALESCE(k.set_code, '') as set_code,
                COALESCE(k.rarity, '') as rarity,
