@@ -18,6 +18,8 @@ def create_app():
     app.jinja_env.filters['format_color_symbols'] = format_color_symbols
 
     from app.routes.collection import collection_bp
+    from app.routes.collections import collections_bp
     app.register_blueprint(collection_bp)
+    app.register_blueprint(collections_bp)
 
     return app

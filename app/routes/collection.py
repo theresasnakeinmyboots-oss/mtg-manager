@@ -25,8 +25,23 @@ def browse():
     page = request.args.get('page', 1, type=int)
     offset = (page - 1) * per_page
 
+    # Collection switcher
+    collection_id = request.args.get('coll', type=int)
+    all_collections = db.execute(
+        'SELECT * FROM collections WHERE is_staging = 0 ORDER BY name'
+    ).fetchall()
+    active_collection = None
+    if collection_id:
+        active_collection = db.execute(
+            'SELECT * FROM collections WHERE id = ?', (collection_id,)
+        ).fetchone()
+
     where_clause = 'WHERE 1=1'
     params = []
+
+    if collection_id:
+        where_clause += ' AND c.collection_id = ?'
+        params.append(collection_id)
 
     search_q = request.args.get('q', '').strip()
     if search_q:
@@ -108,7 +123,10 @@ def browse():
                          filter_type=card_type,
                          filter_set=set_code,
                          filter_condition=condition,
-                         filter_foil=foil)
+                         filter_foil=foil,
+                         all_collections=all_collections,
+                         active_collection=active_collection,
+                         collection_id=collection_id or '')
 
 @collection_bp.route('/collection/<int:card_id>')
 def card_detail(card_id):

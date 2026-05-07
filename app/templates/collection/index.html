@@ -7,8 +7,17 @@
 
     <div class="collection-toolbar">
         <div class="toolbar-left">
+            <div class="collection-switcher">
+                <select id="collectionSelect" onchange="switchCollection(this.value)">
+                    <option value="">All cards</option>
+                    {% for c in all_collections %}
+                    <option value="{{ c.id }}" {% if collection_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
             <span class="total-count">{{ total }} card{% if total != 1 %}s{% endif %}</span>
             <form method="GET" class="search-form">
+                <input type="hidden" name="coll" value="{{ collection_id }}">
                 <input type="hidden" name="sort" value="{{ sort_by }}">
                 <input type="hidden" name="color" value="{{ filter_color }}">
                 <input type="hidden" name="type" value="{{ filter_type }}">
@@ -20,11 +29,12 @@
         </div>
         <div class="toolbar-right">
             <button id="filterToggle" class="btn btn-secondary btn-sm">Filters{% if filter_color or filter_type or filter_set or filter_condition or filter_foil %} ●{% endif %}</button>
-            <select name="sort" class="sort-select" onchange="applySort(this.value)">
+            <select class="sort-select" onchange="applySort(this.value)">
                 <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name</option>
                 <option value="set" {% if sort_by == 'set' %}selected{% endif %}>Set</option>
                 <option value="count" {% if sort_by == 'count' %}selected{% endif %}>Count ↓</option>
             </select>
+            <a href="/collections" class="btn btn-secondary btn-sm">Collections</a>
             <button id="importBtn" class="btn btn-primary btn-sm">Import CSV</button>
         </div>
     </div>
@@ -33,6 +43,7 @@
         <form method="GET" class="filter-form-inline">
             <input type="hidden" name="q" value="{{ search_q }}">
             <input type="hidden" name="sort" value="{{ sort_by }}">
+            <input type="hidden" name="coll" value="{{ collection_id }}">
             <select name="color">
                 <option value="">Any colour</option>
                 <option value="W" {% if filter_color == 'W' %}selected{% endif %}>White</option>
@@ -62,7 +73,7 @@
             </select>
             <label class="foil-check"><input type="checkbox" name="foil" value="foil" {% if filter_foil %}checked{% endif %}> Foil only</label>
             <button type="submit" class="btn btn-primary btn-sm">Apply</button>
-            <a href="/collection" class="btn btn-secondary btn-sm">Clear</a>
+            <a href="/collection{% if collection_id %}?coll={{ collection_id }}{% endif %}" class="btn btn-secondary btn-sm">Clear</a>
         </form>
     </div>
 
@@ -83,21 +94,22 @@
     </div>
 
     <div class="pagination">
+        {% set qs = 'coll=' ~ collection_id ~ '&q=' ~ search_q ~ '&sort=' ~ sort_by ~ '&color=' ~ filter_color ~ '&type=' ~ filter_type ~ '&set=' ~ filter_set ~ '&condition=' ~ filter_condition ~ (('&foil=' ~ filter_foil) if filter_foil else '') %}
         {% if page > 1 %}
-        <a href="?page={{ page - 1 }}&q={{ search_q }}&sort={{ sort_by }}&color={{ filter_color }}&type={{ filter_type }}&set={{ filter_set }}&condition={{ filter_condition }}{% if filter_foil %}&foil=foil{% endif %}" class="btn btn-secondary">← Prev</a>
+        <a href="?{{ qs }}&page={{ page - 1 }}" class="btn btn-secondary">← Prev</a>
         {% endif %}
         <span>Page {{ page }} of {{ ((total - 1) // per_page) + 1 }}</span>
         {% if page * per_page < total %}
-        <a href="?page={{ page + 1 }}&q={{ search_q }}&sort={{ sort_by }}&color={{ filter_color }}&type={{ filter_type }}&set={{ filter_set }}&condition={{ filter_condition }}{% if filter_foil %}&foil=foil{% endif %}" class="btn btn-secondary">Next →</a>
+        <a href="?{{ qs }}&page={{ page + 1 }}" class="btn btn-secondary">Next →</a>
         {% endif %}
     </div>
 
     {% else %}
     <div class="empty-state">
         {% if search_q or filter_color or filter_type or filter_set or filter_condition or filter_foil %}
-        <p>No cards match your filters. <a href="/collection">Clear filters</a></p>
+        <p>No cards match your filters. <a href="/collection{% if collection_id %}?coll={{ collection_id }}{% endif %}">Clear filters</a></p>
         {% else %}
-        <p>Your collection is empty.</p>
+        <p>No cards here yet.</p>
         <button id="importBtnEmpty" class="btn btn-primary" style="margin-top:1rem;">Import CSV to get started</button>
         {% endif %}
     </div>
@@ -105,32 +117,60 @@
 
 </div>
 
+<!-- Import modal -->
 <div id="importModal" class="modal" style="display:none;">
     <div class="modal-content">
         <span class="modal-close">&times;</span>
         <h2>Import Collection</h2>
         <form id="importForm">
             <input type="file" name="file" accept=".csv" required>
-            <button type="submit" class="btn btn-primary">Upload</button>
+            <button type="submit" class="btn btn-primary" style="margin-top:1rem;">Upload & Enrich</button>
         </form>
-        <div id="importStatus"></div>
-        <div id="progressContainer" style="display:none; margin-top: 1.5rem;">
+        <div id="progressContainer" style="display:none; margin-top:1.5rem;">
             <div class="progress-bar">
-                <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+                <div id="progressFill" class="progress-fill" style="width:0%"></div>
             </div>
             <p id="progressMessage" style="text-align:center; margin-top:0.75rem; color:var(--text-secondary); font-size:0.9rem;"></p>
+        </div>
+        <div id="importStatus"></div>
+    </div>
+</div>
+
+<!-- Assign staging modal -->
+<div id="assignModal" class="modal" style="display:none;">
+    <div class="modal-content">
+        <h2>Where should these cards go?</h2>
+        <p id="assignSummary" style="color:var(--text-secondary); margin-bottom:1.5rem;"></p>
+        <div style="display:flex; flex-direction:column; gap:1rem;">
+            <div>
+                <label style="font-size:0.9rem; color:var(--text-secondary); display:block; margin-bottom:0.4rem;">Add to existing collection</label>
+                <select id="destSelect" style="width:100%; padding:0.6rem; background:var(--background); border:1px solid var(--border); border-radius:8px; color:var(--text-primary);">
+                    <option value="">— choose —</option>
+                    {% for c in all_collections %}
+                    <option value="{{ c.id }}">{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="text-align:center; color:var(--text-secondary); font-size:0.85rem;">or</div>
+            <div>
+                <label style="font-size:0.9rem; color:var(--text-secondary); display:block; margin-bottom:0.4rem;">Create new collection</label>
+                <input id="destNewName" type="text" placeholder="Collection name…" style="width:100%; padding:0.6rem; background:var(--background); border:1px solid var(--border); border-radius:8px; color:var(--text-primary);">
+            </div>
+            <button id="assignConfirm" class="btn btn-primary">Move Cards</button>
+            <div id="assignStatus"></div>
         </div>
     </div>
 </div>
 
 <script>
-// Filter panel toggle
-document.getElementById('filterToggle').addEventListener('click', () => {
-    const p = document.getElementById('filterPanel');
-    p.style.display = p.style.display === 'none' ? 'block' : 'none';
-});
+function switchCollection(val) {
+    const url = new URL(window.location);
+    if (val) url.searchParams.set('coll', val);
+    else url.searchParams.delete('coll');
+    url.searchParams.set('page', '1');
+    window.location = url;
+}
 
-// Sort dropdown
 function applySort(val) {
     const url = new URL(window.location);
     url.searchParams.set('sort', val);
@@ -138,19 +178,25 @@ function applySort(val) {
     window.location = url;
 }
 
-// Import modal
-const modal = document.getElementById('importModal');
-function openImport() { modal.style.display = 'block'; }
+document.getElementById('filterToggle').addEventListener('click', () => {
+    const p = document.getElementById('filterPanel');
+    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+});
+
+const importModal = document.getElementById('importModal');
+const assignModal = document.getElementById('assignModal');
+
+function openImport() { importModal.style.display = 'block'; }
 document.getElementById('importBtn').addEventListener('click', openImport);
 const emptyBtn = document.getElementById('importBtnEmpty');
 if (emptyBtn) emptyBtn.addEventListener('click', openImport);
-document.querySelector('.modal-close').addEventListener('click', () => modal.style.display = 'none');
-window.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
-
-// Search on enter (form submits naturally, this just ensures it)
-document.querySelector('.search-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') e.target.closest('form').submit();
+document.querySelector('#importModal .modal-close').addEventListener('click', () => importModal.style.display = 'none');
+window.addEventListener('click', e => {
+    if (e.target === importModal) importModal.style.display = 'none';
+    if (e.target === assignModal) assignModal.style.display = 'none';
 });
+
+let pendingStagingId = null;
 
 document.getElementById('importForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -164,9 +210,10 @@ document.getElementById('importForm').addEventListener('submit', async (e) => {
     progressContainer.style.display = 'block';
     progressFill.style.width = '0%';
     progressMessage.textContent = 'Starting import...';
+    e.target.querySelector('button').disabled = true;
 
     try {
-        const response = await fetch('/import', { method: 'POST', body: formData });
+        const response = await fetch('/collections/import', { method: 'POST', body: formData });
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let results = null;
@@ -174,8 +221,7 @@ document.getElementById('importForm').addEventListener('submit', async (e) => {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            const lines = decoder.decode(value).split('\n');
-            for (const line of lines) {
+            for (const line of decoder.decode(value).split('\n')) {
                 if (!line.startsWith('data: ')) continue;
                 try {
                     const data = JSON.parse(line.slice(6));
@@ -187,13 +233,49 @@ document.getElementById('importForm').addEventListener('submit', async (e) => {
         }
 
         if (results) {
-            progressContainer.style.display = 'none';
-            status.innerHTML = `<p class="success">✓ Imported ${results.inserted} cards, enriched ${results.enriched} (${results.skipped} duplicates)</p>`;
-            setTimeout(() => location.reload(), 1500);
+            importModal.style.display = 'none';
+            pendingStagingId = results.staging_id;
+            document.getElementById('assignSummary').textContent =
+                `${results.inserted} cards imported and enriched from "${results.staging_name}". Choose where to put them:`;
+            assignModal.style.display = 'block';
         }
     } catch (err) {
         progressContainer.style.display = 'none';
         status.innerHTML = `<p class="error">✗ Error: ${err.message}</p>`;
+        e.target.querySelector('button').disabled = false;
+    }
+});
+
+document.getElementById('assignConfirm').addEventListener('click', async () => {
+    const destId = document.getElementById('destSelect').value;
+    const destName = document.getElementById('destNewName').value.trim();
+    if (!destId && !destName) {
+        document.getElementById('assignStatus').innerHTML = '<p class="error">Please choose or name a collection.</p>';
+        return;
+    }
+
+    const btn = document.getElementById('assignConfirm');
+    btn.disabled = true;
+    btn.textContent = 'Moving…';
+
+    const res = await fetch('/collections/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ staging_id: pendingStagingId, dest_id: destId ? parseInt(destId) : null, dest_name: destName })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+        document.getElementById('assignStatus').innerHTML =
+            `<p class="success">✓ ${data.moved + data.merged} cards moved to "${data.dest_name}" (${data.merged} merged with existing).</p>`;
+        setTimeout(() => {
+            assignModal.style.display = 'none';
+            location.reload();
+        }, 1500);
+    } else {
+        document.getElementById('assignStatus').innerHTML = `<p class="error">✗ ${data.error}</p>`;
+        btn.disabled = false;
+        btn.textContent = 'Move Cards';
     }
 });
 </script>

@@ -1,0 +1,178 @@
+{% extends 'base.html' %}
+{% block title %}Collections - MTG Manager{% endblock %}
+{% block content %}
+<div class="collections-page">
+
+    <div class="page-header-row">
+        <h1>Collections</h1>
+        <button id="newCollectionBtn" class="btn btn-primary">New Collection</button>
+    </div>
+
+    <div class="collections-grid">
+        {% for c in collections %}
+        <div class="collection-card" data-id="{{ c.id }}">
+            <div class="collection-card-body">
+                <h3>
+                    <a href="/collection?coll={{ c.id }}">{{ c.name }}</a>
+                </h3>
+                {% if c.description %}
+                <p class="collection-desc">{{ c.description }}</p>
+                {% endif %}
+                <p class="collection-meta">Created {{ c.created_at[:10] }}</p>
+            </div>
+            <div class="collection-card-actions">
+                <button class="btn btn-secondary btn-sm rename-btn" data-id="{{ c.id }}" data-name="{{ c.name }}">Rename</button>
+                <button class="btn btn-danger btn-sm delete-btn" data-id="{{ c.id }}" data-name="{{ c.name }}">Delete</button>
+            </div>
+        </div>
+        {% else %}
+        <p style="color:var(--text-secondary);">No collections yet. Create one or import a CSV.</p>
+        {% endfor %}
+    </div>
+
+    {% if staging %}
+    <h2 style="margin-top:2rem; margin-bottom:1rem; font-size:1.1rem; color:var(--text-secondary);">Pending imports</h2>
+    <div class="collections-grid">
+        {% for s in staging %}
+        <div class="collection-card staging">
+            <div class="collection-card-body">
+                <h3>{{ s.name }}</h3>
+                <p class="collection-meta">{{ s.card_count }} cards · Awaiting assignment</p>
+            </div>
+            <div class="collection-card-actions">
+                <button class="btn btn-primary btn-sm assign-btn"
+                        data-id="{{ s.id }}" data-name="{{ s.name }}" data-count="{{ s.card_count }}">
+                    Assign →
+                </button>
+                <button class="btn btn-danger btn-sm delete-btn" data-id="{{ s.id }}" data-name="{{ s.name }}">Discard</button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+</div>
+
+<!-- New collection modal -->
+<div id="newModal" class="modal" style="display:none;">
+    <div class="modal-content">
+        <span class="modal-close">&times;</span>
+        <h2>New Collection</h2>
+        <div style="display:flex; flex-direction:column; gap:1rem; margin-top:1rem;">
+            <input id="newName" type="text" placeholder="Name…" style="padding:0.6rem; background:var(--background); border:1px solid var(--border); border-radius:8px; color:var(--text-primary);">
+            <input id="newDesc" type="text" placeholder="Description (optional)…" style="padding:0.6rem; background:var(--background); border:1px solid var(--border); border-radius:8px; color:var(--text-primary);">
+            <button id="newConfirm" class="btn btn-primary">Create</button>
+        </div>
+    </div>
+</div>
+
+<!-- Assign staging modal -->
+<div id="assignModal" class="modal" style="display:none;">
+    <div class="modal-content">
+        <h2>Assign Import</h2>
+        <p id="assignSummary" style="color:var(--text-secondary); margin-bottom:1.5rem;"></p>
+        <div style="display:flex; flex-direction:column; gap:1rem;">
+            <div>
+                <label style="font-size:0.9rem; color:var(--text-secondary); display:block; margin-bottom:0.4rem;">Add to existing collection</label>
+                <select id="destSelect" style="width:100%; padding:0.6rem; background:var(--background); border:1px solid var(--border); border-radius:8px; color:var(--text-primary);">
+                    <option value="">— choose —</option>
+                    {% for c in collections %}
+                    <option value="{{ c.id }}">{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="text-align:center; color:var(--text-secondary); font-size:0.85rem;">or</div>
+            <div>
+                <label style="font-size:0.9rem; color:var(--text-secondary); display:block; margin-bottom:0.4rem;">Create new collection</label>
+                <input id="destNewName" type="text" placeholder="Collection name…" style="width:100%; padding:0.6rem; background:var(--background); border:1px solid var(--border); border-radius:8px; color:var(--text-primary);">
+            </div>
+            <button id="assignConfirm" class="btn btn-primary">Move Cards</button>
+            <div id="assignStatus"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+let pendingStagingId = null;
+
+// New collection
+const newModal = document.getElementById('newModal');
+document.getElementById('newCollectionBtn').addEventListener('click', () => newModal.style.display = 'block');
+document.querySelector('#newModal .modal-close').addEventListener('click', () => newModal.style.display = 'none');
+document.getElementById('newConfirm').addEventListener('click', async () => {
+    const name = document.getElementById('newName').value.trim();
+    const desc = document.getElementById('newDesc').value.trim();
+    if (!name) return;
+    const res = await fetch('/collections/new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description: desc })
+    });
+    if ((await res.json()).id) location.reload();
+});
+
+// Rename
+document.querySelectorAll('.rename-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const name = prompt('New name:', btn.dataset.name);
+        if (!name || name === btn.dataset.name) return;
+        await fetch(`/collections/${btn.dataset.id}/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        location.reload();
+    });
+});
+
+// Delete
+document.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        if (!confirm(`Delete "${btn.dataset.name}" and all its cards?`)) return;
+        await fetch(`/collections/${btn.dataset.id}/delete`, { method: 'POST' });
+        location.reload();
+    });
+});
+
+// Assign staging
+const assignModal = document.getElementById('assignModal');
+document.querySelectorAll('.assign-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        pendingStagingId = parseInt(btn.dataset.id);
+        document.getElementById('assignSummary').textContent =
+            `"${btn.dataset.name}" has ${btn.dataset.count} cards. Choose where to put them:`;
+        assignModal.style.display = 'block';
+    });
+});
+
+document.getElementById('assignConfirm').addEventListener('click', async () => {
+    const destId = document.getElementById('destSelect').value;
+    const destName = document.getElementById('destNewName').value.trim();
+    if (!destId && !destName) {
+        document.getElementById('assignStatus').innerHTML = '<p class="error">Please choose or name a collection.</p>';
+        return;
+    }
+    const btn = document.getElementById('assignConfirm');
+    btn.disabled = true; btn.textContent = 'Moving…';
+    const res = await fetch('/collections/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ staging_id: pendingStagingId, dest_id: destId ? parseInt(destId) : null, dest_name: destName })
+    });
+    const data = await res.json();
+    if (data.success) {
+        document.getElementById('assignStatus').innerHTML =
+            `<p class="success">✓ ${data.moved + data.merged} cards moved to "${data.dest_name}".</p>`;
+        setTimeout(() => location.reload(), 1200);
+    } else {
+        document.getElementById('assignStatus').innerHTML = `<p class="error">✗ ${data.error}</p>`;
+        btn.disabled = false; btn.textContent = 'Move Cards';
+    }
+});
+
+window.addEventListener('click', e => {
+    if (e.target === newModal) newModal.style.display = 'none';
+    if (e.target === assignModal) assignModal.style.display = 'none';
+});
+</script>
+{% endblock %}
