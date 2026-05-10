@@ -4,89 +4,212 @@
 
 {% block content %}
 <div class="card-detail-page">
-    <a href="/collection" class="btn btn-secondary">← Back to Collection</a>
+    <a href="javascript:history.back()" class="btn btn-secondary btn-sm back-btn">← Back</a>
 
-    <div class="card-detail-container">
-        <div class="card-image-large">
+    <div class="card-detail-layout">
+
+        <!-- Left: card image -->
+        <div class="card-detail-left">
             {% if card.image_uri %}
-            <img src="{{ card.image_uri }}" alt="{{ card.name }}">
+            {% set is_dfc = '/front/' in card.image_uri %}
+            {% set back_uri = card.image_uri.replace('/front/', '/back/') if is_dfc else '' %}
+            <div class="card-flip-container{% if is_dfc %} is-dfc{% endif %}"
+                 {% if is_dfc %}data-front="{{ card.image_uri }}" data-back="{{ back_uri }}"{% endif %}>
+                <img class="card-detail-img" id="cardFaceImg" src="{{ card.image_uri }}" alt="{{ card.name }}">
+                {% if is_dfc %}<div class="card-flip-hint">Hover to flip</div>{% endif %}
+            </div>
             {% else %}
             <div class="no-image-large">No Image Available</div>
             {% endif %}
         </div>
 
-        <div class="card-detail-info">
-            <h1>{{ card.name }}</h1>
+        <!-- Centre: card info -->
+        <div class="card-detail-centre">
 
-            <div class="detail-group">
-                <h3>Location in Collection</h3>
-                <p><strong>Edition:</strong> {% if card.set_code %}{{ card.set_code|format_set_symbol(card.rarity)|safe }} {% endif %}{{ card.edition }}</p>
-                <p><strong>Card Number:</strong> {{ card.card_number }}</p>
-                <p><strong>Count:</strong> {{ card.count }}</p>
+            <div class="cd-field">
+                <span class="cd-label">Card Name</span>
+                <span class="cd-value cd-name">{{ card.name }}</span>
             </div>
 
-            <div class="detail-group">
-                <h3>Condition & Attributes</h3>
-                <p><strong>Condition:</strong> {{ card.condition }}</p>
-                <p><strong>Language:</strong> {{ card.language }}</p>
-                {% if card.foil %}
-                <p><strong>Foil:</strong> Yes</p>
-                {% endif %}
-                {% if card.signed %}
-                <p><strong>Signed:</strong> Yes</p>
-                {% endif %}
-                {% if card.artist_proof %}
-                <p><strong>Artist Proof:</strong> Yes</p>
-                {% endif %}
-                {% if card.altered_art %}
-                <p><strong>Altered Art:</strong> Yes</p>
-                {% endif %}
-                {% if card.misprint %}
-                <p><strong>Misprint:</strong> Yes</p>
-                {% endif %}
-                {% if card.promo %}
-                <p><strong>Promo:</strong> Yes</p>
-                {% endif %}
-                {% if card.textless %}
-                <p><strong>Textless:</strong> Yes</p>
-                {% endif %}
-            </div>
-
-            {% if card.my_price %}
-            <div class="detail-group">
-                <h3>Valuation</h3>
-                <p><strong>My Price:</strong> ${{ "%.2f"|format(card.my_price) }}</p>
+            {% if card.mana_cost %}
+            <div class="cd-field">
+                <span class="cd-label">Mana Cost</span>
+                <span class="cd-value mana-symbols">{{ card.mana_cost|format_mana_cost|safe }}</span>
             </div>
             {% endif %}
 
-            {% if card.scryfall_id %}
-            <div class="detail-group">
-                <h3>Card Data (from Scryfall)</h3>
-                <p><strong>Type:</strong> {{ card.type_line }}</p>
-                <p><strong>Mana Cost:</strong> <span class="mana-symbols">{{ card.mana_cost|format_mana_cost|safe }}</span></p>
+            <div class="cd-field cd-field-split">
+                <div>
+                    <span class="cd-label">Type</span>
+                    <span class="cd-value cd-type">{{ card.type_line }}</span>
+                </div>
+                <div>
+                    <span class="cd-label">Rarity</span>
+                    <span class="cd-value">{{ card.rarity|title if card.rarity else '—' }}</span>
+                </div>
+            </div>
+
+            <hr class="cd-divider">
+
+            {% if card.oracle_text %}
+            <div class="cd-field">
+                <span class="cd-label">Rules Text</span>
+                <div class="cd-value cd-rules">
+                    {% for line in card.oracle_text.split('\n') %}
+                    <p>{{ line|format_oracle_text|safe }}</p>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if card.flavor_text %}
+            <div class="cd-field">
+                <span class="cd-label">Flavor Text</span>
+                <p class="cd-value cd-flavor">{{ card.flavor_text|format_oracle_text|safe }}</p>
+            </div>
+            {% endif %}
+
+            <hr class="cd-divider">
+
+            <div class="cd-field cd-field-split">
+                <div>
+                    <span class="cd-label">Artist</span>
+                    <span class="cd-value cd-highlight">{{ card.artist or '—' }}</span>
+                </div>
                 {% if card.power and card.toughness %}
-                <p><strong>Power/Toughness:</strong> {{ card.power }}/{{ card.toughness }}</p>
-                {% endif %}
-                {% if card.rarity %}
-                <p><strong>Rarity:</strong> {{ card.rarity }}</p>
-                {% endif %}
-                {% if card.oracle_text %}
-                <div class="oracle-text">
-                    <h4>Oracle Text</h4>
-                    <p>{{ card.oracle_text }}</p>
+                <div>
+                    <span class="cd-label">P/T</span>
+                    <span class="cd-value cd-highlight">{{ card.power }}/{{ card.toughness }}</span>
                 </div>
                 {% endif %}
             </div>
-            {% else %}
-            <div class="alert alert-info">
-                <p>Card data not yet enriched.</p>
-                <button id="enrichCardBtn" class="btn btn-primary" style="margin-top: 1rem;">Enrich This Card</button>
-                <div id="enrichStatus" style="margin-top: 1rem;"></div>
+
+            <div class="cd-field cd-field-split">
+                <div>
+                    <span class="cd-label">Set</span>
+                    <span class="cd-value cd-highlight">
+                        {% if card.set_code %}{{ card.set_code|format_set_symbol(card.rarity)|safe }} {% endif %}
+                        {{ card.set_name or card.edition }}
+                    </span>
+                </div>
+                <div>
+                    <span class="cd-label">Number</span>
+                    <span class="cd-value">{{ card.card_number or '—' }}</span>
+                </div>
+            </div>
+
+            <div class="cd-field">
+                <span class="cd-label">Language</span>
+                <span class="cd-value">{{ card.language or 'English' }}</span>
+            </div>
+
+        </div>
+
+        <!-- Right: collection info + legalities -->
+        <div class="card-detail-right">
+
+            {% if card.legal_formats %}
+            <div class="cd-section">
+                <span class="cd-label">Legal Formats</span>
+                <p class="cd-formats">{{ card.legal_formats|join(', ') }}</p>
             </div>
             {% endif %}
+
+            <div class="cd-section">
+                <span class="cd-label">In Your Collection</span>
+                <div class="cd-collection-info">
+                    <div class="cd-stat">
+                        <span class="cd-stat-value">{{ card.count }}</span>
+                        <span class="cd-stat-label">owned</span>
+                    </div>
+                    {% if card.tradelist_count %}
+                    <div class="cd-stat">
+                        <span class="cd-stat-value">{{ card.tradelist_count }}</span>
+                        <span class="cd-stat-label">for trade</span>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="cd-badges">
+                    <span class="cd-badge">{{ card.condition or '—' }}</span>
+                    {% if card.foil %}<span class="cd-badge cd-badge-foil">Foil</span>{% endif %}
+                    {% if card.signed %}<span class="cd-badge">Signed</span>{% endif %}
+                    {% if card.artist_proof %}<span class="cd-badge">Artist Proof</span>{% endif %}
+                    {% if card.altered_art %}<span class="cd-badge">Altered Art</span>{% endif %}
+                    {% if card.misprint %}<span class="cd-badge">Misprint</span>{% endif %}
+                    {% if card.promo %}<span class="cd-badge">Promo</span>{% endif %}
+                    {% if card.textless %}<span class="cd-badge">Textless</span>{% endif %}
+                </div>
+                {% if card.my_price %}
+                <p class="cd-price">My price: ${{ "%.2f"|format(card.my_price) }}</p>
+                {% endif %}
+            </div>
+
+            {% if card.price_usd or card.price_usd_foil or card.price_eur %}
+            <div class="cd-section">
+                <span class="cd-label">Market Prices</span>
+                <div class="cd-prices">
+                    {% if card.foil and card.price_usd_foil %}
+                    <div class="cd-price-row">
+                        <span>USD (foil)</span>
+                        <span class="cd-price-val">${{ "%.2f"|format(card.price_usd_foil) }}</span>
+                    </div>
+                    {% elif card.price_usd %}
+                    <div class="cd-price-row">
+                        <span>USD</span>
+                        <span class="cd-price-val">${{ "%.2f"|format(card.price_usd) }}</span>
+                    </div>
+                    {% endif %}
+                    {% if card.foil and card.price_eur_foil %}
+                    <div class="cd-price-row">
+                        <span>EUR (foil)</span>
+                        <span class="cd-price-val">€{{ "%.2f"|format(card.price_eur_foil) }}</span>
+                    </div>
+                    {% elif card.price_eur %}
+                    <div class="cd-price-row">
+                        <span>EUR</span>
+                        <span class="cd-price-val">€{{ "%.2f"|format(card.price_eur) }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+                {% if card.prices_updated_at %}
+                <p class="cd-prices-updated">Updated {{ card.prices_updated_at[:10] }}</p>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <div class="cd-section">
+                <button id="enrichCardBtn" class="btn btn-secondary btn-sm">{% if card.scryfall_id %}Refresh Card Data{% else %}Enrich Card Data{% endif %}</button>
+                <div id="enrichStatus" style="margin-top:0.75rem;"></div>
+            </div>
+
         </div>
     </div>
 </div>
+
+{% if alternatives %}
+<div class="alt-printings">
+    <h3 class="alt-printings-title">Other Printings <span class="alt-count">({{ alternatives|length }})</span></h3>
+    <div class="alt-grid">
+        {% for alt in alternatives %}
+        <div class="alt-thumb {% if alt.scryfall_id == card.scryfall_id %}alt-current{% endif %}"
+             data-scryfall-id="{{ alt.scryfall_id }}"
+             title="{{ alt.set_name }} #{{ alt.collector_number }}">
+            {% if alt.image_uri_normal %}
+            <img src="{{ alt.image_uri_normal }}" alt="{{ card.name }} — {{ alt.set_name }}" loading="lazy">
+            {% else %}
+            <div class="alt-no-image">{{ alt.set_code }}</div>
+            {% endif %}
+            <div class="alt-label">{{ alt.set_code|upper }} #{{ alt.collector_number }}</div>
+            {% if alt.scryfall_id != card.scryfall_id %}
+            <button class="alt-switch-btn btn btn-primary btn-sm" data-scryfall-id="{{ alt.scryfall_id }}">Use this</button>
+            {% else %}
+            <div class="alt-current-label">Current</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 <script>
 const enrichCardBtn = document.getElementById('enrichCardBtn');
@@ -96,26 +219,72 @@ if (enrichCardBtn) {
         enrichCardBtn.textContent = 'Enriching...';
         const enrichStatus = document.getElementById('enrichStatus');
         enrichStatus.innerHTML = '';
-
         try {
-            const collectionId = new URL(window.location).pathname.split('/').pop();
-            const response = await fetch(`/enrich-card/${collectionId}`, { method: 'POST' });
-            const data = await response.json();
-
+            const id = window.location.pathname.split('/').pop();
+            const res = await fetch(`/enrich-card/${id}`, { method: 'POST' });
+            const data = await res.json();
             if (data.success) {
-                enrichStatus.innerHTML = '<p class="success">✓ Card enriched! Reloading...</p>';
+                enrichStatus.innerHTML = '<p class="success">✓ Done! Reloading…</p>';
                 setTimeout(() => location.reload(), 1000);
             } else {
-                enrichStatus.innerHTML = `<p class="error">✗ Error: ${data.error}</p>`;
+                enrichStatus.innerHTML = `<p class="error">✗ ${data.error}</p>`;
                 enrichCardBtn.disabled = false;
-                enrichCardBtn.textContent = 'Enrich This Card';
+                enrichCardBtn.textContent = 'Enrich Card Data';
             }
         } catch (err) {
-            enrichStatus.innerHTML = `<p class="error">✗ Error: ${err.message}</p>`;
+            enrichStatus.innerHTML = `<p class="error">✗ ${err.message}</p>`;
             enrichCardBtn.disabled = false;
-            enrichCardBtn.textContent = 'Enrich This Card';
+            enrichCardBtn.textContent = 'Enrich Card Data';
         }
     });
+}
+
+document.querySelectorAll('.alt-switch-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const scryfallId = btn.dataset.scryfallId;
+        const rowId = {{ card.collection_row_id }};
+        btn.disabled = true;
+        btn.textContent = 'Switching…';
+        try {
+            const res = await fetch(`/collection/${rowId}/switch-printing`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scryfall_id: scryfallId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                window.location = `/collection/${data.new_row_id}`;
+            } else {
+                btn.disabled = false;
+                btn.textContent = 'Use this';
+                alert(data.error);
+            }
+        } catch (err) {
+            btn.disabled = false;
+            btn.textContent = 'Use this';
+            alert(err.message);
+        }
+    });
+});
+
+// DFC flip on hover
+const flipContainer = document.querySelector('.card-flip-container.is-dfc');
+if (flipContainer) {
+    const img = document.getElementById('cardFaceImg');
+    const front = flipContainer.dataset.front;
+    const back = flipContainer.dataset.back;
+    let backLoaded = false;
+    flipContainer.addEventListener('mouseenter', () => {
+        if (!backLoaded) {
+            const preload = new Image();
+            preload.onload = () => { backLoaded = true; img.src = back; };
+            preload.onerror = () => {};
+            preload.src = back;
+        } else {
+            img.src = back;
+        }
+    });
+    flipContainer.addEventListener('mouseleave', () => { img.src = front; });
 }
 </script>
 {% endblock %}

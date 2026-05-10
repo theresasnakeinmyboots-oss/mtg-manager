@@ -1,0 +1,2 @@
+ALTER TABLE cards ADD COLUMN flavor_text TEXT DEFAULT '';
+ALTER TABLE cards ADD COLUMN artist TEXT DEFAULT '';

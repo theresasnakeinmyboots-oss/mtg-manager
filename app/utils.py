@@ -28,6 +28,12 @@ SET_CODE_MAP = {
     'UNH': 'unh', 'UNM': 'unm', 'UGL': 'ugl',
 }
 
+_NAMED_SYMBOLS = {
+    'T': 'tap', 'Q': 'untap', 'E': 'e', 'P': 'p',
+    'PW': 'planeswalker', 'CHAOS': 'chaos',
+    'A': 'acorn', 'TK': 'ticket',
+}
+
 def _symbol_to_ms_class(symbol: str) -> str:
     """
     Convert a single Scryfall mana symbol (without braces, uppercased) to
@@ -37,8 +43,11 @@ def _symbol_to_ms_class(symbol: str) -> str:
     The Mana library uses concatenated lowercase: wu, 2w, wp.
     All casting-cost symbols get ms-cost for the colored circle.
     """
-    # Strip braces and uppercase
     inner = symbol.strip('{}').upper()
+
+    # Named non-mana symbols (tap, untap, energy, etc.)
+    if inner in _NAMED_SYMBOLS:
+        return f'ms ms-{_NAMED_SYMBOLS[inner]} ms-cost'
 
     # Generic numeric (0-20) and X, Y, Z, C, S
     if re.match(r'^(\d+|X|Y|Z|C|S)$', inner):
@@ -54,17 +63,29 @@ def _symbol_to_ms_class(symbol: str) -> str:
         code = ''.join(p.lower() for p in parts)
         return f'ms ms-{code} ms-cost'
 
-    # Five-color and other multi-letter codes (WUBRG etc.)
+    # Fallback
     return f'ms ms-{inner.lower()} ms-cost'
 
 
 def format_mana_cost(mana_cost: str) -> str:
-    """Convert a Scryfall mana cost string to HTML with colored Mana symbols."""
+    """Convert a pure Scryfall mana cost string (e.g. {1}{W}{U}) to mana symbol HTML."""
     if not mana_cost:
         return ''
-
     symbols = re.findall(r'\{[^}]+\}', mana_cost)
     return ''.join(f'<i class="{_symbol_to_ms_class(s)}"></i>' for s in symbols)
+
+
+def format_oracle_text(text: str) -> str:
+    """Replace {X} tokens inline within oracle text, preserving surrounding words."""
+    if not text:
+        return ''
+    import html as _html
+    safe = _html.escape(text)
+    return re.sub(
+        r'\{([^}]+)\}',
+        lambda m: f'<i class="{_symbol_to_ms_class(m.group(0))}"></i>',
+        safe
+    )
 
 RARITY_CLASS_MAP = {
     'COMMON': 'ss-common',

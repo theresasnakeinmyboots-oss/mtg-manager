@@ -18,7 +18,11 @@
                 {% if c.description %}
                 <p class="collection-desc">{{ c.description }}</p>
                 {% endif %}
-                <p class="collection-meta">Created {{ c.created_at[:10] }}</p>
+                <p class="collection-meta">
+                    {{ c.card_count }} card{% if c.card_count != 1 %}s{% endif %}
+                    {% if c.total_value %} · ${{ "%.2f"|format(c.total_value) }}{% endif %}
+                    · Created {{ c.created_at[:10] }}
+                </p>
             </div>
             <div class="collection-card-actions">
                 <button class="btn btn-secondary btn-sm rename-btn" data-id="{{ c.id }}" data-name="{{ c.name }}">Rename</button>

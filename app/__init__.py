@@ -1,6 +1,6 @@
 from flask import Flask
 from app.database import init_db
-from app.utils import format_mana_cost, format_set_symbol, format_color_symbols
+from app.utils import format_mana_cost, format_set_symbol, format_color_symbols, format_oracle_text
 import config
 from pathlib import Path
 
@@ -16,6 +16,7 @@ def create_app():
     app.jinja_env.filters['format_mana_cost'] = format_mana_cost
     app.jinja_env.filters['format_set_symbol'] = format_set_symbol
     app.jinja_env.filters['format_color_symbols'] = format_color_symbols
+    app.jinja_env.filters['format_oracle_text'] = format_oracle_text
 
     from app.routes.collection import collection_bp
     from app.routes.collections import collections_bp

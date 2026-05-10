@@ -13,7 +13,20 @@ collections_bp = Blueprint('collections', __name__, url_prefix='/collections')
 
 def get_all_collections(db):
     return db.execute(
-        'SELECT * FROM collections WHERE is_staging = 0 ORDER BY name'
+        '''SELECT c.*,
+               COALESCE(SUM(col.count), 0) as card_count,
+               COALESCE(SUM(
+                   col.count * CASE WHEN col.foil = 'foil'
+                       THEN COALESCE(k.price_usd_foil, k.price_usd, 0)
+                       ELSE COALESCE(k.price_usd, 0)
+                   END
+               ), 0) as total_value
+           FROM collections c
+           LEFT JOIN collection col ON col.collection_id = c.id
+           LEFT JOIN cards k ON col.card_id = k.id
+           WHERE c.is_staging = 0
+           GROUP BY c.id
+           ORDER BY c.name'''
     ).fetchall()
 
 
@@ -111,22 +124,34 @@ def import_to_staging():
             unenriched = cursor.fetchall()
             total_unenriched = len(unenriched)
 
+            from app.scryfall import EDITION_TO_SET_CODE
+            import json as _json
             enriched = 0
+            failed = []
             for i, row in enumerate(unenriched):
-                if client.enrich_card(row['id'], row['name'], row['edition'], row['edition']):
+                set_code = EDITION_TO_SET_CODE.get(row['edition'], row['edition'])
+                ok, reason = client.enrich_card(row['id'], row['name'], row['edition'], set_code)
+                if ok:
                     enriched += 1
+                else:
+                    failed.append({'name': row['name'], 'edition': row['edition'], 'reason': reason})
                 progress = 40 + int((i + 1) / max(total_unenriched, 1) * 59)
-                yield f'data: {{"status": "enriching", "progress": {progress}, "message": "Enriching card {i+1}/{total_unenriched}..."}}\n\n'
+                yield 'data: ' + _json.dumps({
+                    'status': 'card', 'progress': progress,
+                    'name': row['name'], 'edition': row['edition'], 'ok': ok,
+                    'reason': reason, 'current': i + 1, 'total': total_unenriched
+                }) + '\n\n'
 
             db.close()
-            yield (
-                f'data: {{"status": "complete", "progress": 100, "message": "Complete!", '
-                f'"inserted": {inserted}, "skipped": {skipped}, "enriched": {enriched}, '
-                f'"staging_id": {staging_id}, "staging_name": "{label}"}}\n\n'
-            )
+            yield 'data: ' + _json.dumps({
+                'status': 'complete', 'progress': 100, 'message': 'Complete!',
+                'inserted': inserted, 'skipped': skipped, 'enriched': enriched,
+                'staging_id': staging_id, 'staging_name': label,
+                'failed': failed
+            }) + '\n\n'
         except Exception as e:
             db.close()
-            yield f'data: {{"status": "error", "message": "{str(e)}"}}\n\n'
+            yield 'data: ' + _json.dumps({'status': 'error', 'message': str(e)}) + '\n\n'
 
     return Response(generate(), mimetype='text/event-stream')
 

@@ -18,7 +18,9 @@
             <span class="total-count">{{ total }} card{% if total != 1 %}s{% endif %}</span>
             <form method="GET" class="search-form">
                 <input type="hidden" name="coll" value="{{ collection_id }}">
-                <input type="hidden" name="sort" value="{{ sort_by }}">
+                <input type="hidden" name="sort1" value="{{ sort1 }}">
+                <input type="hidden" name="sort2" value="{{ sort2 }}">
+                <input type="hidden" name="sort3" value="{{ sort3 }}">
                 <input type="hidden" name="color" value="{{ filter_color }}">
                 <input type="hidden" name="type" value="{{ filter_type }}">
                 <input type="hidden" name="set" value="{{ filter_set }}">
@@ -29,11 +31,27 @@
         </div>
         <div class="toolbar-right">
             <button id="filterToggle" class="btn btn-secondary btn-sm">Filters{% if filter_color or filter_type or filter_set or filter_condition or filter_foil %} ●{% endif %}</button>
-            <select class="sort-select" onchange="applySort(this.value)">
-                <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name</option>
-                <option value="set" {% if sort_by == 'set' %}selected{% endif %}>Set</option>
-                <option value="count" {% if sort_by == 'count' %}selected{% endif %}>Count ↓</option>
-            </select>
+            <div class="sort-controls">
+                <span class="sort-label">Sort:</span>
+                <select class="sort-select" id="sort1" onchange="applySort()">
+                    {% set sort_opts = [('name','Name'),('set','Set'),('count','Count'),('color','Colour'),('type','Type'),('cost','Cost'),('rarity','Rarity')] %}
+                    {% for val, label in sort_opts %}
+                    <option value="{{ val }}" {% if sort1 == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select class="sort-select" id="sort2" onchange="applySort()">
+                    <option value="" {% if not sort2 %}selected{% endif %}>then…</option>
+                    {% for val, label in sort_opts %}
+                    <option value="{{ val }}" {% if sort2 == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select class="sort-select" id="sort3" onchange="applySort()">
+                    <option value="" {% if not sort3 %}selected{% endif %}>then…</option>
+                    {% for val, label in sort_opts %}
+                    <option value="{{ val }}" {% if sort3 == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
             <a href="/collections" class="btn btn-secondary btn-sm">Collections</a>
             <button id="importBtn" class="btn btn-primary btn-sm">Import CSV</button>
         </div>
@@ -42,7 +60,9 @@
     <div id="filterPanel" class="filter-panel" style="display:none;">
         <form method="GET" class="filter-form-inline">
             <input type="hidden" name="q" value="{{ search_q }}">
-            <input type="hidden" name="sort" value="{{ sort_by }}">
+            <input type="hidden" name="sort1" value="{{ sort1 }}">
+            <input type="hidden" name="sort2" value="{{ sort2 }}">
+            <input type="hidden" name="sort3" value="{{ sort3 }}">
             <input type="hidden" name="coll" value="{{ collection_id }}">
             <select name="color">
                 <option value="">Any colour</option>
@@ -77,8 +97,7 @@
         </form>
     </div>
 
-    {% if cards %}
-    <div class="cards-grid-tight">
+    <div class="cards-grid-tight" id="cardsGrid">
         {% for card in cards %}
         <a href="/collection/{{ card.id }}" class="card-thumb" title="{{ card.name }}{% if card.foil %} ✦{% endif %}">
             {% if card.image_uri %}
@@ -91,46 +110,38 @@
             {% endif %}
         </a>
         {% endfor %}
+        {% if not cards %}
+        <div class="empty-state" id="emptyState">
+            {% if search_q or filter_color or filter_type or filter_set or filter_condition or filter_foil %}
+            <p>No cards match your filters. <a href="/collection{% if collection_id %}?coll={{ collection_id }}{% endif %}">Clear filters</a></p>
+            {% else %}
+            <p>No cards here yet.</p>
+            <button id="importBtnEmpty" class="btn btn-primary" style="margin-top:1rem;">Import CSV to get started</button>
+            {% endif %}
+        </div>
+        {% endif %}
     </div>
+    <div id="scrollSentinel" style="height:1px;"></div>
+    <div id="scrollLoader" style="display:none; text-align:center; padding:1rem; color:var(--text-secondary); font-size:0.85rem;">Loading…</div>
 
-    <div class="pagination">
-        {% set qs = 'coll=' ~ collection_id ~ '&q=' ~ search_q ~ '&sort=' ~ sort_by ~ '&color=' ~ filter_color ~ '&type=' ~ filter_type ~ '&set=' ~ filter_set ~ '&condition=' ~ filter_condition ~ (('&foil=' ~ filter_foil) if filter_foil else '') %}
-        {% if page > 1 %}
-        <a href="?{{ qs }}&page={{ page - 1 }}" class="btn btn-secondary">← Prev</a>
-        {% endif %}
-        <span>Page {{ page }} of {{ ((total - 1) // per_page) + 1 }}</span>
-        {% if page * per_page < total %}
-        <a href="?{{ qs }}&page={{ page + 1 }}" class="btn btn-secondary">Next →</a>
-        {% endif %}
-    </div>
-
-    {% else %}
-    <div class="empty-state">
-        {% if search_q or filter_color or filter_type or filter_set or filter_condition or filter_foil %}
-        <p>No cards match your filters. <a href="/collection{% if collection_id %}?coll={{ collection_id }}{% endif %}">Clear filters</a></p>
-        {% else %}
-        <p>No cards here yet.</p>
-        <button id="importBtnEmpty" class="btn btn-primary" style="margin-top:1rem;">Import CSV to get started</button>
-        {% endif %}
-    </div>
-    {% endif %}
 
 </div>
 
 <!-- Import modal -->
 <div id="importModal" class="modal" style="display:none;">
-    <div class="modal-content">
+    <div class="modal-content import-modal-content">
         <span class="modal-close">&times;</span>
         <h2>Import Collection</h2>
         <form id="importForm">
             <input type="file" name="file" accept=".csv" required>
             <button type="submit" class="btn btn-primary" style="margin-top:1rem;">Upload & Enrich</button>
         </form>
-        <div id="progressContainer" style="display:none; margin-top:1.5rem;">
-            <div class="progress-bar">
+        <div id="enrichingPane" style="display:none; margin-top:1.25rem;">
+            <div class="progress-bar" style="margin-bottom:0.75rem;">
                 <div id="progressFill" class="progress-fill" style="width:0%"></div>
             </div>
-            <p id="progressMessage" style="text-align:center; margin-top:0.75rem; color:var(--text-secondary); font-size:0.9rem;"></p>
+            <p id="progressMessage" style="color:var(--text-secondary); font-size:0.85rem; margin-bottom:0.75rem;"></p>
+            <div id="cardFeed" class="card-feed"></div>
         </div>
         <div id="importStatus"></div>
     </div>
@@ -140,7 +151,8 @@
 <div id="assignModal" class="modal" style="display:none;">
     <div class="modal-content">
         <h2>Where should these cards go?</h2>
-        <p id="assignSummary" style="color:var(--text-secondary); margin-bottom:1.5rem;"></p>
+        <p id="assignSummary" style="color:var(--text-secondary); margin-bottom:0.75rem;"></p>
+        <div id="assignFailed" style="margin-bottom:1rem;"></div>
         <div style="display:flex; flex-direction:column; gap:1rem;">
             <div>
                 <label style="font-size:0.9rem; color:var(--text-secondary); display:block; margin-bottom:0.4rem;">Add to existing collection</label>
@@ -167,16 +179,117 @@ function switchCollection(val) {
     const url = new URL(window.location);
     if (val) url.searchParams.set('coll', val);
     else url.searchParams.delete('coll');
-    url.searchParams.set('page', '1');
+    url.searchParams.delete('page');
     window.location = url;
 }
 
-function applySort(val) {
+function applySort() {
     const url = new URL(window.location);
-    url.searchParams.set('sort', val);
-    url.searchParams.set('page', '1');
+    const s1 = document.getElementById('sort1').value;
+    const s2 = document.getElementById('sort2').value;
+    const s3 = document.getElementById('sort3').value;
+    url.searchParams.set('sort1', s1);
+    if (s2) url.searchParams.set('sort2', s2); else url.searchParams.delete('sort2');
+    if (s3) url.searchParams.set('sort3', s3); else url.searchParams.delete('sort3');
+    url.searchParams.delete('sort');
+    url.searchParams.delete('page');
     window.location = url;
 }
+
+// Infinite scroll
+(function () {
+    let nextPage = {{ page }} + 1;
+    let hasMore = {{ (page * per_page < total) | tojson }};
+    let loading = false;
+    const grid = document.getElementById('cardsGrid');
+    const sentinel = document.getElementById('scrollSentinel');
+    const loader = document.getElementById('scrollLoader');
+
+    function cardHTML(card) {
+        const foilMark = card.foil ? ' ✦' : '';
+        const title = (card.name + foilMark).replace(/"/g, '&quot;');
+        let inner;
+        if (card.image_uri) {
+            inner = `<img src="${card.image_uri}" alt="${title}" loading="lazy">`;
+        } else {
+            inner = `<div class="no-image-thumb">${card.name}</div>`;
+        }
+        const badge = card.count > 1 ? `<span class="thumb-count">×${card.count}</span>` : '';
+        return `<a href="/collection/${card.id}" class="card-thumb" title="${title}">${inner}${badge}</a>`;
+    }
+
+    async function loadMore() {
+        if (loading || !hasMore) return;
+        loading = true;
+        loader.style.display = 'block';
+
+        const url = new URL('/collection/cards.json', window.location.origin);
+        new URL(window.location).searchParams.forEach((v, k) => url.searchParams.set(k, v));
+        url.searchParams.set('page', nextPage);
+
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            data.cards.forEach(card => {
+                grid.insertAdjacentHTML('beforeend', cardHTML(card));
+            });
+            hasMore = data.has_more;
+            nextPage++;
+        } catch (_) {
+            hasMore = false;
+        }
+
+        loading = false;
+        loader.style.display = 'none';
+    }
+
+    if (hasMore) {
+        const observer = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting) loadMore();
+        }, { rootMargin: '200px' });
+        observer.observe(sentinel);
+    }
+})();
+
+// Card zoom on hover
+(function () {
+    const zoom = document.createElement('div');
+    zoom.id = 'cardZoom';
+    zoom.style.display = 'none';
+    document.body.appendChild(zoom);
+    const grid = document.getElementById('cardsGrid');
+    if (!grid) return;
+    let hideTimer = null;
+
+    grid.addEventListener('mouseover', e => {
+        const thumb = e.target.closest('.card-thumb');
+        if (!thumb) return;
+        const img = thumb.querySelector('img');
+        if (!img) return;
+        clearTimeout(hideTimer);
+        zoom.innerHTML = `<img src="${img.src}" alt="${img.alt}">`;
+        zoom.style.display = 'block';
+        positionZoom(thumb);
+    });
+
+    grid.addEventListener('mouseout', e => {
+        const thumb = e.target.closest('.card-thumb');
+        if (!thumb) return;
+        hideTimer = setTimeout(() => { zoom.style.display = 'none'; }, 80);
+    });
+
+    function positionZoom(thumb) {
+        const r = thumb.getBoundingClientRect();
+        const zw = 280, zh = zw * 1.4;
+        let left = r.right + 12;
+        let top = r.top;
+        if (left + zw > window.innerWidth - 8) left = r.left - zw - 12;
+        if (top + zh > window.innerHeight - 8) top = window.innerHeight - zh - 8;
+        if (top < 8) top = 8;
+        zoom.style.left = left + 'px';
+        zoom.style.top = top + 'px';
+    }
+})();
 
 document.getElementById('filterToggle').addEventListener('click', () => {
     const p = document.getElementById('filterPanel');
@@ -202,14 +315,16 @@ document.getElementById('importForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
     const status = document.getElementById('importStatus');
-    const progressContainer = document.getElementById('progressContainer');
+    const enrichingPane = document.getElementById('enrichingPane');
     const progressFill = document.getElementById('progressFill');
     const progressMessage = document.getElementById('progressMessage');
+    const cardFeed = document.getElementById('cardFeed');
 
     status.innerHTML = '';
-    progressContainer.style.display = 'block';
+    enrichingPane.style.display = 'block';
     progressFill.style.width = '0%';
-    progressMessage.textContent = 'Starting import...';
+    progressMessage.textContent = 'Uploading…';
+    cardFeed.innerHTML = '';
     e.target.querySelector('button').disabled = true;
 
     try {
@@ -217,30 +332,71 @@ document.getElementById('importForm').addEventListener('submit', async (e) => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let results = null;
+        let buf = '';
 
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            for (const line of decoder.decode(value).split('\n')) {
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop(); // keep incomplete last line
+            for (const line of lines) {
                 if (!line.startsWith('data: ')) continue;
-                try {
-                    const data = JSON.parse(line.slice(6));
-                    progressFill.style.width = data.progress + '%';
+                let data;
+                try { data = JSON.parse(line.slice(6)); } catch (_) { continue; }
+
+                progressFill.style.width = data.progress + '%';
+
+                if (data.status === 'card') {
+                    progressMessage.textContent = `Enriching ${data.current} / ${data.total}…`;
+                    const el = document.createElement('div');
+                    el.className = 'card-feed-item ' + (data.ok ? 'feed-ok' : 'feed-fail');
+                    if (data.ok) {
+                        el.textContent = data.name;
+                    } else {
+                        el.innerHTML = `<span class="feed-name">${data.name}</span><span class="feed-reason">${data.reason || 'Not found'}</span>`;
+                    }
+                    cardFeed.appendChild(el);
+                    cardFeed.scrollTop = cardFeed.scrollHeight;
+                    if (data.ok) {
+                        setTimeout(() => el.remove(), 1000);
+                    }
+                } else if (data.status === 'enriching' || data.status === 'importing') {
                     progressMessage.textContent = data.message;
-                    if (data.status === 'complete') results = data;
-                } catch (_) {}
+                } else if (data.status === 'complete') {
+                    results = data;
+                } else if (data.status === 'error') {
+                    status.innerHTML = `<p class="error">✗ ${data.message}</p>`;
+                }
             }
         }
 
         if (results) {
             importModal.style.display = 'none';
             pendingStagingId = results.staging_id;
-            document.getElementById('assignSummary').textContent =
-                `${results.inserted} cards imported and enriched from "${results.staging_name}". Choose where to put them:`;
+
+            const failed = results.failed || [];
+            let summary = `${results.inserted} cards imported: ${results.enriched} enriched`;
+            if (failed.length) summary += `, ${failed.length} failed`;
+            summary += `. Choose where to put them:`;
+            document.getElementById('assignSummary').textContent = summary;
+
+            const failedContainer = document.getElementById('assignFailed');
+            if (failed.length) {
+                let html = `<details class="failed-details"><summary>${failed.length} card${failed.length !== 1 ? 's' : ''} not enriched</summary><table class="failed-table"><thead><tr><th>Name</th><th>Edition</th></tr></thead><tbody>`;
+                failed.forEach(r => {
+                    html += `<tr><td>${r.name}</td><td>${r.edition}</td></tr>`;
+                });
+                html += '</tbody></table></details>';
+                failedContainer.innerHTML = html;
+            } else {
+                failedContainer.innerHTML = '';
+            }
+
             assignModal.style.display = 'block';
         }
     } catch (err) {
-        progressContainer.style.display = 'none';
+        enrichingPane.style.display = 'none';
         status.innerHTML = `<p class="error">✗ Error: ${err.message}</p>`;
         e.target.querySelector('button').disabled = false;
     }
