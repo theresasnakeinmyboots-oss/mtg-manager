@@ -6,20 +6,20 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: mtg-manager-app
-    ports:
-      - "8000:8000"
+    expose:
+      - "8001"
     volumes:
-      - data:/data
+      - mtg-data:/data
     environment:
       - DATA_DIR=/data
       - FLASK_DEBUG=false
     restart: unless-stopped
 
   nginx:
-    image: nginx:latest
+    image: nginx:alpine
     container_name: mtg-manager-nginx
     ports:
-      - "80:80"
+      - "5002:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -27,5 +27,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  data:
+  mtg-data:
     driver: local

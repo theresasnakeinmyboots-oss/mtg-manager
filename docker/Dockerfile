@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+# Run migrations on startup, then launch gunicorn
+# Use 2 workers on Pi to avoid OOM; timeout extended for SSE imports
+EXPOSE 8001
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "60", "wsgi:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8001", "--workers", "2", "--timeout", "300", "wsgi:app"]
