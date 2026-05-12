@@ -140,13 +140,19 @@ function buildDropdown(q) {
         const label = document.createElement('span');
         label.textContent = `${name} (${code})`;
         div.appendChild(label);
-        div.addEventListener('click', () => {
+        div.addEventListener('click', e => {
             if (selectedCodes.includes(code)) {
                 selectedCodes = selectedCodes.filter(c => c !== code);
             } else {
                 selectedCodes = [...selectedCodes, code];
             }
-            navigate();
+            if (e.ctrlKey || e.metaKey) {
+                // Stay open — update checkmarks and chips without navigating
+                renderChips();
+                buildDropdown(searchInput.value.toLowerCase().trim());
+            } else {
+                navigate();
+            }
         });
         dropdown.appendChild(div);
     });
@@ -179,11 +185,55 @@ searchInput.addEventListener('keydown', e => {
         if (active) active.classList.remove('active');
         if (prev) prev.classList.add('active');
     } else if (e.key === 'Enter') {
-        if (active) active.click();
-        else dropdown.style.display = 'none';
+        if (active) {
+            // Enter always navigates (same as plain click)
+            const syntheticClick = new MouseEvent('click', { bubbles: true });
+            active.dispatchEvent(syntheticClick);
+        } else {
+            navigate();
+        }
     } else if (e.key === 'Escape') {
         dropdown.style.display = 'none';
+        navigate();
     }
 });
+
+// ── Hover zoom ────────────────────────────────────────────────────
+(function () {
+    const zoom = document.createElement('div');
+    zoom.id = 'cardZoom';
+    zoom.style.display = 'none';
+    document.body.appendChild(zoom);
+    let hideTimer = null;
+
+    document.addEventListener('mouseover', e => {
+        const thumb = e.target.closest('.set-card-thumb');
+        if (!thumb) return;
+        const img = thumb.querySelector('img');
+        if (!img) return;
+        clearTimeout(hideTimer);
+        zoom.innerHTML = `<img src="${img.src}" alt="${img.alt}">`;
+        zoom.style.display = 'block';
+        positionZoom(thumb);
+    });
+
+    document.addEventListener('mouseout', e => {
+        const thumb = e.target.closest('.set-card-thumb');
+        if (!thumb) return;
+        hideTimer = setTimeout(() => { zoom.style.display = 'none'; }, 80);
+    });
+
+    function positionZoom(thumb) {
+        const r = thumb.getBoundingClientRect();
+        const zw = 280, zh = zw * 1.4;
+        let left = r.right + 12;
+        let top = r.top;
+        if (left + zw > window.innerWidth - 8) left = r.left - zw - 12;
+        if (top + zh > window.innerHeight - 8) top = window.innerHeight - zh - 8;
+        if (top < 8) top = 8;
+        zoom.style.left = left + 'px';
+        zoom.style.top = top + 'px';
+    }
+})();
 </script>
 {% endblock %}

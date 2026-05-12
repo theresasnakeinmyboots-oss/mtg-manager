@@ -53,7 +53,7 @@
                 </select>
             </div>
             <a href="/collections" class="btn btn-secondary btn-sm">Collections</a>
-            <button id="importBtn" class="btn btn-primary btn-sm">Import CSV</button>
+            <button id="importBtn" class="btn btn-primary btn-sm">Import</button>
         </div>
     </div>
 
@@ -116,7 +116,7 @@
             <p>No cards match your filters. <a href="/collection{% if collection_id %}?coll={{ collection_id }}{% endif %}">Clear filters</a></p>
             {% else %}
             <p>No cards here yet.</p>
-            <button id="importBtnEmpty" class="btn btn-primary" style="margin-top:1rem;">Import CSV to get started</button>
+            <button id="importBtnEmpty" class="btn btn-primary" style="margin-top:1rem;">Import to get started</button>
             {% endif %}
         </div>
         {% endif %}
@@ -132,8 +132,11 @@
     <div class="modal-content import-modal-content">
         <span class="modal-close">&times;</span>
         <h2>Import Collection</h2>
+        <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:0.75rem;">
+            Accepts <strong>.csv</strong> (Deckbox export) or <strong>.dlens</strong> (Delver Lens) files.
+        </p>
         <form id="importForm">
-            <input type="file" name="file" accept=".csv" required>
+            <input type="file" name="file" accept=".csv,.dlens" required>
             <button type="submit" class="btn btn-primary" style="margin-top:1rem;">Upload & Enrich</button>
         </form>
         <div id="enrichingPane" style="display:none; margin-top:1.25rem;">
@@ -376,8 +379,10 @@ document.getElementById('importForm').addEventListener('submit', async (e) => {
             pendingStagingId = results.staging_id;
 
             const failed = results.failed || [];
+            const missing = results.missing || [];
             let summary = `${results.inserted} cards imported: ${results.enriched} enriched`;
             if (failed.length) summary += `, ${failed.length} failed`;
+            if (missing.length) summary += `, ${missing.length} not found in database`;
             summary += `. Choose where to put them:`;
             document.getElementById('assignSummary').textContent = summary;
 

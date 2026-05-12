@@ -2,6 +2,7 @@ from flask import Blueprint, render_template, request, jsonify, Response
 from app.database import get_db
 from app.scryfall import ScryfallClient
 from app.importer import import_csv
+from app.importer_dlens import import_dlens
 from werkzeug.utils import secure_filename
 from datetime import datetime
 from pathlib import Path
@@ -88,14 +89,16 @@ def rename_collection(collection_id):
 
 @collections_bp.route('/import', methods=['POST'])
 def import_to_staging():
-    """Upload a CSV into a fresh staging collection, then stream enrichment progress."""
+    """Upload a CSV or .dlens file into a fresh staging collection, then stream enrichment progress."""
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
     file = request.files['file']
-    if not file.filename.endswith('.csv'):
-        return jsonify({'error': 'Only CSV files allowed'}), 400
-
     filename = secure_filename(file.filename)
+    is_dlens = filename.lower().endswith('.dlens')
+    is_csv = filename.lower().endswith('.csv')
+    if not is_dlens and not is_csv:
+        return jsonify({'error': 'Only .csv or .dlens files are supported'}), 400
+
     filepath = config.DATA_DIR / filename
     file.save(str(filepath))
 
@@ -113,24 +116,50 @@ def import_to_staging():
             staging_id = cursor.lastrowid
             db.commit()
 
-            inserted, skipped = import_csv(str(filepath), db, collection_id=staging_id)
+            if is_dlens:
+                import json as _json
+                datadb_path = config.DATA_DIR / 'data.db'
+                yield 'data: ' + _json.dumps({
+                    'status': 'importing', 'progress': 10,
+                    'message': f'Reading {filename}…'
+                }) + '\n\n'
+                inserted, skipped, missing, schema_info = import_dlens(
+                    str(filepath), str(datadb_path), db, collection_id=staging_id
+                )
+                yield 'data: ' + _json.dumps({
+                    'status': 'importing', 'progress': 35,
+                    'message': (
+                        f'Inserted {inserted}, skipped {skipped}, missing {len(missing)} — '
+                        f'dlens cols: {schema_info["dlens_cols"]}, apk cols: {schema_info["apk_cols"]}'
+                    )
+                }) + '\n\n'
+            else:
+                import json as _json
+                inserted, skipped = import_csv(str(filepath), db, collection_id=staging_id)
+                missing = []
             yield f'data: {{"status": "enriching", "progress": 40, "message": "Starting enrichment..."}}\n\n'
 
             client = ScryfallClient(db)
+            # For CSV: card_id is NULL — needs full enrichment
+            # For dlens: card_id is set but cards row may be a stub (enriched_at IS NULL)
             cursor = db.execute(
-                'SELECT id, name, edition FROM collection WHERE card_id IS NULL AND collection_id = ? ORDER BY id',
+                '''SELECT c.id, c.name, c.edition, c.card_number
+                   FROM collection c
+                   LEFT JOIN cards k ON k.id = c.card_id
+                   WHERE c.collection_id = ?
+                   AND (c.card_id IS NULL OR k.enriched_at IS NULL)
+                   ORDER BY c.id''',
                 (staging_id,)
             )
             unenriched = cursor.fetchall()
             total_unenriched = len(unenriched)
 
-            from app.scryfall import EDITION_TO_SET_CODE
             import json as _json
             enriched = 0
             failed = []
             for i, row in enumerate(unenriched):
-                set_code = EDITION_TO_SET_CODE.get(row['edition'], row['edition'])
-                ok, reason = client.enrich_card(row['id'], row['name'], row['edition'], set_code)
+                set_code = client._set_name_map.get(row['edition'], row['edition'])
+                ok, reason = client.enrich_card(row['id'], row['name'], row['edition'], set_code, collector_number=row['card_number'])
                 if ok:
                     enriched += 1
                 else:
@@ -147,7 +176,8 @@ def import_to_staging():
                 'status': 'complete', 'progress': 100, 'message': 'Complete!',
                 'inserted': inserted, 'skipped': skipped, 'enriched': enriched,
                 'staging_id': staging_id, 'staging_name': label,
-                'failed': failed
+                'failed': failed,
+                'missing': missing
             }) + '\n\n'
         except Exception as e:
             db.close()

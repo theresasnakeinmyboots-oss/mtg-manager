@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin - MTG Manager{% endblock %}
+
+{% block content %}
+<div class="admin-page">
+    <h1 class="admin-title">Admin</h1>
+
+    <div class="admin-section">
+        <h2 class="admin-section-title">Delver Lens APK Database</h2>
+        <p class="admin-section-desc">
+            The <code>data.db</code> file is extracted from the Delver Lens Android APK and maps
+            internal card IDs to Scryfall UUIDs. Upload it once — it only needs replacing when
+            Delver Lens releases a new card database.
+        </p>
+
+        <div class="admin-status">
+            {% if datadb_exists %}
+            <span class="admin-status-ok">✓ data.db present</span>
+            <span class="admin-status-meta">{{ datadb_size_kb }} KB · uploaded {{ datadb_mtime }}</span>
+            {% else %}
+            <span class="admin-status-missing">✗ data.db not uploaded yet — .dlens imports will fail until this is provided</span>
+            {% endif %}
+        </div>
+
+        <form id="datadbForm" style="margin-top:1rem;">
+            <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                <input type="file" name="file" accept=".db" required id="datadbFile">
+                <button type="submit" class="btn btn-primary btn-sm" id="datadbBtn">
+                    {% if datadb_exists %}Replace data.db{% else %}Upload data.db{% endif %}
+                </button>
+            </div>
+        </form>
+        <div id="datadbStatus" style="margin-top:0.75rem;"></div>
+    </div>
+</div>
+
+<script>
+document.getElementById('datadbForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = document.getElementById('datadbBtn');
+    const status = document.getElementById('datadbStatus');
+    const file = document.getElementById('datadbFile').files[0];
+    if (!file) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Uploading…';
+    status.innerHTML = '';
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch('/admin/upload-datadb', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.success) {
+            status.innerHTML = `<span style="color:var(--success)">✓ Uploaded successfully (${data.size_kb} KB). Reloading…</span>`;
+            setTimeout(() => location.reload(), 1200);
+        } else {
+            status.innerHTML = `<span style="color:var(--danger)">✗ ${data.error}</span>`;
+            btn.disabled = false;
+            btn.textContent = 'Upload data.db';
+        }
+    } catch (err) {
+        status.innerHTML = `<span style="color:var(--danger)">✗ ${err.message}</span>`;
+        btn.disabled = false;
+        btn.textContent = 'Upload data.db';
+    }
+});
+</script>
+{% endblock %}

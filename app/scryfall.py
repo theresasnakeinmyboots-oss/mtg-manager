@@ -142,9 +142,9 @@ EDITION_TO_SET_CODE = {
     "Scars of Mirrodin": "som",
     "Scourge": "scg",
     "Secret Lair Drop": "sld",
-    "Secrets of Strixhaven": "sta",
-    "Secrets of Strixhaven Commander": "stc",
-    "Secrets of Strixhaven Mystical Archive": "sta",
+    "Secrets of Strixhaven": "sos",
+    "Secrets of Strixhaven Commander": "soc",
+    "Secrets of Strixhaven Mystical Archive": "soa",
     "Shadowmoor": "shm",
     "Shards of Alara": "ala",
     "Starter Commander Decks": "scd",
@@ -193,6 +193,16 @@ class ScryfallClient:
         self.base_url = config.SCRYFALL_API_BASE
         self.last_request_time = 0
         self.rate_limit_ms = config.SCRYFALL_RATE_LIMIT_MS
+        # Build set name → code map from bulk data, overriding hardcoded entries
+        self._set_name_map = dict(EDITION_TO_SET_CODE)
+        try:
+            rows = db.execute(
+                'SELECT DISTINCT set_name, set_code FROM scryfall_bulk'
+            ).fetchall()
+            for r in rows:
+                self._set_name_map[r['set_name']] = r['set_code'].lower()
+        except Exception:
+            pass
 
     def _rate_limit(self):
         elapsed = (time.time() - self.last_request_time) * 1000
@@ -258,8 +268,17 @@ class ScryfallClient:
                 return None
         return None
 
-    def get_card_from_bulk(self, name: str, set_code: str) -> Optional[Dict[str, Any]]:
+    def get_card_from_bulk(self, name: str, set_code: str, collector_number: str = None) -> Optional[Dict[str, Any]]:
         """Look up a card in the local bulk table. Returns formatted card dict or None."""
+        # Most specific: name + set + collector number
+        if collector_number:
+            row = self.db.execute(
+                'SELECT * FROM scryfall_bulk WHERE name = ? AND set_code = ? AND collector_number = ? LIMIT 1',
+                (name, set_code.upper(), str(collector_number))
+            ).fetchone()
+            if row:
+                return self._format_bulk_row(dict(row))
+        # name + set
         row = self.db.execute(
             'SELECT * FROM scryfall_bulk WHERE name = ? AND set_code = ? LIMIT 1',
             (name, set_code.upper())
@@ -271,7 +290,9 @@ class ScryfallClient:
             ).fetchone()
         if not row:
             return None
-        row = dict(row)
+        return self._format_bulk_row(dict(row))
+
+    def _format_bulk_row(self, row: dict) -> Dict[str, Any]:
         return {
             'scryfall_id': row['scryfall_id'],
             'name': row['name'],
@@ -347,14 +368,14 @@ class ScryfallClient:
         self._set_cache(cache_key, formatted)
         return formatted
 
-    def enrich_card(self, collection_id: int, name: str, edition: str, set_code: str, max_retries: int = 1, force_update: bool = False) -> tuple[bool, str]:
+    def enrich_card(self, collection_id: int, name: str, edition: str, set_code: str, max_retries: int = 1, force_update: bool = False, collector_number: str = None) -> tuple[bool, str]:
         # Resolve full edition name → Scryfall set code if needed
-        resolved_code = EDITION_TO_SET_CODE.get(edition, set_code)
+        resolved_code = self._set_name_map.get(edition, set_code)
         last_error = 'Not found on Scryfall'
 
         # Try bulk table first (fast, no rate limits)
         if self._bulk_available():
-            card_data = self.get_card_from_bulk(name, resolved_code)
+            card_data = self.get_card_from_bulk(name, resolved_code, collector_number=collector_number)
             if card_data:
                 try:
                     return self._write_card(card_data, collection_id, force_update), ''
@@ -398,7 +419,12 @@ class ScryfallClient:
         row = cursor.fetchone()
         card_id = row[0] if row else None
 
-        if card_id and force_update:
+        # Check if the existing cards row is a stub (no enriched_at) that needs filling in
+        is_stub = card_id and not self.db.execute(
+            'SELECT enriched_at FROM cards WHERE id = ? AND enriched_at IS NOT NULL', (card_id,)
+        ).fetchone()
+
+        if card_id and (force_update or is_stub):
             self.db.execute(
                 '''UPDATE cards SET name=?, set_code=?, set_name=?, collector_number=?,
                    mana_cost=?, cmc=?, colors=?, color_identity=?, type_line=?,
