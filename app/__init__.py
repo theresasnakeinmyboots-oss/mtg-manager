@@ -20,7 +20,9 @@ def create_app():
 
     from app.routes.collection import collection_bp
     from app.routes.collections import collections_bp
+    from app.routes.sets import sets_bp
     app.register_blueprint(collection_bp)
     app.register_blueprint(collections_bp)
+    app.register_blueprint(sets_bp)
 
     return app

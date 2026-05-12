@@ -30,7 +30,7 @@ def get_all_collections(db):
     ).fetchall()
 
 
-@collections_bp.route('/')
+@collections_bp.route('/', strict_slashes=False)
 def index():
     db = get_db()
     collections = get_all_collections(db)

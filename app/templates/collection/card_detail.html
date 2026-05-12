@@ -199,7 +199,7 @@
             {% else %}
             <div class="alt-no-image">{{ alt.set_code }}</div>
             {% endif %}
-            <div class="alt-label">{{ alt.set_code|upper }} #{{ alt.collector_number }}</div>
+            <div class="alt-label">{{ alt.set_name }} #{{ alt.collector_number }}</div>
             {% if alt.scryfall_id != card.scryfall_id %}
             <button class="alt-switch-btn btn btn-primary btn-sm" data-scryfall-id="{{ alt.scryfall_id }}">Use this</button>
             {% else %}

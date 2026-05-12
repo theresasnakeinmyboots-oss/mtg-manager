@@ -1,0 +1,189 @@
+{% extends 'base.html' %}
+
+{% block title %}Set View{% if groups %} — {{ groups|map(attribute='set_name')|join(', ') }}{% endif %} - MTG Manager{% endblock %}
+
+{% block content %}
+<div class="set-view-page">
+
+    <div class="set-toolbar">
+        <div class="set-toolbar-left">
+            <select id="collectionSelect" onchange="switchCollection(this.value)">
+                <option value="">All cards</option>
+                {% for c in all_collections %}
+                <option value="{{ c.id }}" {% if collection_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+            </select>
+
+            <div class="set-search-wrap">
+                <div class="set-chips" id="setChips"></div>
+                <div class="set-input-row">
+                    <input type="text" id="setSearch" placeholder="Add a set…" autocomplete="off" class="search-input" style="width:100%;box-sizing:border-box;">
+                    <div id="setDropdown" class="set-dropdown" style="display:none;"></div>
+                </div>
+            </div>
+
+            {% if groups %}
+            {% set ns = namespace(total_cards=0, total_owned=0) %}
+            {% for g in groups %}
+                {% set ns.total_cards = ns.total_cards + g.cards|length %}
+                {% set ns.total_owned = ns.total_owned + (g.cards|selectattr('owned_count','gt',0)|list|length) %}
+            {% endfor %}
+            <span class="total-count">{{ ns.total_cards }} cards · {{ ns.total_owned }} owned</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if groups %}
+        {% for group in groups %}
+        <div class="set-group">
+            <h2 class="set-group-heading">{{ group.set_name }} <span class="set-group-meta">({{ group.set_code }}) — {{ group.cards|length }} cards, {{ group.cards|selectattr('owned_count','gt',0)|list|length }} owned</span></h2>
+            {% if group.cards %}
+            <div class="set-grid">
+                {% for card in group.cards %}
+                <div class="set-card-thumb {% if card.owned_count == 0 %}unowned{% endif %}">
+                    {% if card.collection_row_id %}
+                    <a href="/collection/{{ card.collection_row_id }}">
+                    {% endif %}
+                        {% if card.image_uri_normal %}
+                        <img src="{{ card.image_uri_normal }}" alt="{{ card.name }}" loading="lazy">
+                        {% else %}
+                        <div class="no-image-thumb">{{ card.name }}</div>
+                        {% endif %}
+                    {% if card.collection_row_id %}
+                    </a>
+                    {% endif %}
+                    {% if card.owned_count > 0 %}
+                    <span class="thumb-count">×{{ card.owned_count }}</span>
+                    {% endif %}
+                    <div class="set-card-num">#{{ card.collector_number }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="empty-state-inline">No cards found for this set.</p>
+            {% endif %}
+        </div>
+        {% endfor %}
+
+    {% else %}
+    <div class="empty-state"><p>Select one or more sets above to get started.</p></div>
+    {% endif %}
+
+</div>
+
+<script>
+const allSets = {{ all_sets | tojson }};
+// Selected set codes driven from URL; chips rendered on load
+let selectedCodes = {{ set_codes | tojson }};
+
+function currentUrl() { return new URL(window.location); }
+
+function navigate() {
+    const url = currentUrl();
+    url.searchParams.delete('set');
+    selectedCodes.forEach(c => url.searchParams.append('set', c));
+    window.location = url;
+}
+
+function switchCollection(val) {
+    const url = currentUrl();
+    if (val) url.searchParams.set('coll', val);
+    else url.searchParams.delete('coll');
+    window.location = url;
+}
+
+// ── Chips ────────────────────────────────────────────────────────
+const chipsEl = document.getElementById('setChips');
+const setNameMap = Object.fromEntries(allSets);
+
+function renderChips() {
+    chipsEl.innerHTML = '';
+    selectedCodes.forEach(code => {
+        const chip = document.createElement('span');
+        chip.className = 'set-chip';
+        chip.textContent = setNameMap[code] || code;
+        const x = document.createElement('button');
+        x.className = 'set-chip-remove';
+        x.textContent = '×';
+        x.setAttribute('aria-label', `Remove ${code}`);
+        x.addEventListener('click', () => {
+            selectedCodes = selectedCodes.filter(c => c !== code);
+            navigate();
+        });
+        chip.appendChild(x);
+        chipsEl.appendChild(chip);
+    });
+}
+
+renderChips();
+
+// ── Dropdown ─────────────────────────────────────────────────────
+const searchInput = document.getElementById('setSearch');
+const dropdown = document.getElementById('setDropdown');
+
+function buildDropdown(q) {
+    dropdown.innerHTML = '';
+    const matches = allSets.filter(([code, name]) => {
+        if (!q) return true;
+        return name.toLowerCase().includes(q) || code.toLowerCase().includes(q);
+    }).slice(0, 50);
+
+    if (!matches.length) { dropdown.style.display = 'none'; return; }
+
+    matches.forEach(([code, name]) => {
+        const div = document.createElement('div');
+        div.className = 'set-dropdown-item' + (selectedCodes.includes(code) ? ' selected' : '');
+        const cb = document.createElement('span');
+        cb.className = 'set-dropdown-check';
+        cb.textContent = selectedCodes.includes(code) ? '✓' : '';
+        div.appendChild(cb);
+        const label = document.createElement('span');
+        label.textContent = `${name} (${code})`;
+        div.appendChild(label);
+        div.addEventListener('click', () => {
+            if (selectedCodes.includes(code)) {
+                selectedCodes = selectedCodes.filter(c => c !== code);
+            } else {
+                selectedCodes = [...selectedCodes, code];
+            }
+            navigate();
+        });
+        dropdown.appendChild(div);
+    });
+    dropdown.style.display = 'block';
+}
+
+searchInput.addEventListener('focus', () => {
+    buildDropdown(searchInput.value.toLowerCase().trim());
+});
+
+searchInput.addEventListener('input', () => {
+    buildDropdown(searchInput.value.toLowerCase().trim());
+});
+
+document.addEventListener('click', e => {
+    if (!e.target.closest('.set-search-wrap')) dropdown.style.display = 'none';
+});
+
+searchInput.addEventListener('keydown', e => {
+    const items = dropdown.querySelectorAll('.set-dropdown-item');
+    const active = dropdown.querySelector('.set-dropdown-item.active');
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = active ? active.nextElementSibling : items[0];
+        if (active) active.classList.remove('active');
+        if (next) next.classList.add('active');
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const prev = active ? active.previousElementSibling : items[items.length - 1];
+        if (active) active.classList.remove('active');
+        if (prev) prev.classList.add('active');
+    } else if (e.key === 'Enter') {
+        if (active) active.click();
+        else dropdown.style.display = 'none';
+    } else if (e.key === 'Escape') {
+        dropdown.style.display = 'none';
+    }
+});
+</script>
+{% endblock %}

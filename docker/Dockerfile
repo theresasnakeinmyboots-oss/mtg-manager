@@ -15,4 +15,4 @@ COPY . .
 # Use 2 workers on Pi to avoid OOM; timeout extended for SSE imports
 EXPOSE 8001
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8001", "--workers", "2", "--timeout", "300", "wsgi:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8001", "--worker-class", "gevent", "--workers", "2", "--worker-connections", "20", "--timeout", "300", "wsgi:app"]

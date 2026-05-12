@@ -43,7 +43,7 @@ def test_keyrune():
 
 @collection_bp.route('/')
 def index():
-    return redirect(url_for('collection.browse'))
+    return redirect('/collection')
 
 @collection_bp.route('/collection')
 def browse():

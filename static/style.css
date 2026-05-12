@@ -344,7 +344,7 @@ main {
     text-align: center;
 }
 
-.thumb-count {
+.card-thumb .thumb-count {
     position: absolute;
     bottom: 5px;
     right: 6px;
@@ -887,65 +887,137 @@ i.ss {
     .cards-grid {
         grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     }
+
+    .card-detail-layout {
+        grid-template-columns: 220px 1fr 240px;
+        gap: 1.25rem;
+    }
+
+    .sort-controls {
+        flex-wrap: wrap;
+    }
 }
 
 @media (max-width: 768px) {
-    .collection-page {
-        grid-template-columns: 1fr;
-    }
-
-    .sidebar {
-        position: static;
-    }
-
-    .cards-grid {
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    }
-
-    .card-detail-layout {
-        grid-template-columns: 1fr;
-    }
-
-    .nav-container {
-        flex-direction: column;
-        gap: 1.5rem;
-    }
-
-    .nav-brand {
-        font-size: 1.5rem;
-    }
-
-    .nav-menu {
-        gap: 1.5rem;
-        font-size: 0.95rem;
-    }
-
-    .page-header h1 {
-        font-size: 1.75rem;
-    }
-
-}
-
-@media (max-width: 480px) {
     main {
         padding: 1rem;
     }
 
-    .sidebar {
-        padding: 1.5rem;
-    }
-
-    .main-content {
-        padding: 1.5rem;
-    }
-
-    .cards-grid {
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-        gap: 1rem;
+    /* Nav */
+    .nav-container {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
     }
 
     .nav-menu {
+        gap: 1rem;
+        font-size: 0.9rem;
+        flex-wrap: wrap;
+    }
+
+    /* Toolbar: stack left/right */
+    .collection-toolbar {
         flex-direction: column;
+        align-items: stretch;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
+    }
+
+    .toolbar-left {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .toolbar-right {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .search-form {
+        max-width: 100%;
+        flex: 1 1 100%;
+    }
+
+    .sort-controls {
+        flex-wrap: wrap;
+        gap: 0.35rem;
+    }
+
+    .sort-label {
+        display: none;
+    }
+
+    /* Card grid: 4 columns on tablet */
+    .cards-grid-tight {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 4px;
+    }
+
+    /* Card detail: image + info stacked, right column below */
+    .card-detail-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .card-detail-left {
+        max-width: 260px;
+        margin: 0 auto;
+    }
+
+    /* Collections grid */
+    .collections-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Alt printings: fewer columns */
+    .alt-grid {
+        grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    }
+}
+
+@media (max-width: 480px) {
+    main {
+        padding: 0.75rem;
+    }
+
+    /* Nav: wrap menu items */
+    .nav-menu {
+        gap: 0.6rem;
+        font-size: 0.85rem;
+    }
+
+    /* Card grid: 3 columns on phone */
+    .cards-grid-tight {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 3px;
+    }
+
+    /* Toolbar sort: hide 3rd sort on small screens */
+    #sort3 {
+        display: none;
+    }
+
+    /* Filter panel full-width controls */
+    .filter-form-inline select,
+    .filter-form-inline input[type="text"] {
+        width: 100%;
+    }
+
+    /* Card detail */
+    .card-detail-left {
+        max-width: 200px;
+    }
+
+    .cd-field-split {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+
+    /* Collections page */
+    .page-header-row {
+        flex-direction: column;
+        align-items: flex-start;
         gap: 0.75rem;
     }
 }
@@ -1154,4 +1226,248 @@ i.ss {
 
 .card-detail-img {
     transition: opacity 0.15s ease;
+}
+
+/* ── Set View ─────────────────────────────────────────────────── */
+.set-view-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.set-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+.set-toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.set-search-wrap {
+    flex: 1;
+    min-width: 220px;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+/* The input row is the positioned ancestor for the dropdown */
+.set-input-row {
+    position: relative;
+}
+
+.set-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.set-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: var(--primary);
+    color: #fff;
+    font-size: 0.78rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 99px;
+    white-space: nowrap;
+}
+
+.set-chip-remove {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0;
+    opacity: 0.75;
+}
+
+.set-chip-remove:hover { opacity: 1; }
+
+.set-search-wrap .search-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.set-dropdown {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    right: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 200;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+}
+
+.set-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.75rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.set-dropdown-item.selected {
+    background: color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+.set-dropdown-item:hover,
+.set-dropdown-item.active {
+    background: var(--primary);
+    color: #fff;
+}
+
+.set-dropdown-check {
+    width: 1em;
+    text-align: center;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+/* Set group heading */
+.set-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.set-group-heading {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0.5rem 0 0;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.set-group-meta {
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+.empty-state-inline {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    padding: 0.5rem 0;
+}
+
+.total-count {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* Card grid */
+.set-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 0.75rem;
+}
+
+.set-card-thumb {
+    position: relative;
+    border-radius: 8px;
+    transition: transform 0.15s;
+}
+
+.set-card-thumb:hover {
+    transform: scale(1.04);
+    z-index: 2;
+}
+
+.set-card-thumb a {
+    display: block;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.set-card-thumb img {
+    width: 100%;
+    display: block;
+    border-radius: 8px;
+}
+
+.set-card-thumb.unowned img,
+.set-card-thumb.unowned .no-image-thumb {
+    opacity: 0.35;
+    filter: grayscale(60%);
+}
+
+.no-image-thumb {
+    width: 100%;
+    aspect-ratio: 5/7;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0.5rem;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    box-sizing: border-box;
+}
+
+.set-card-thumb .thumb-count {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: auto;
+    height: auto;
+    background: rgba(0,0,0,0.75);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.15rem 0.4rem;
+    border-radius: 99px;
+    line-height: 1.2;
+    z-index: 1;
+}
+
+.set-card-num {
+    text-align: center;
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    padding: 0.2rem 0;
+}
+
+@media (max-width: 768px) {
+    .set-grid {
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        gap: 0.5rem;
+    }
+
+    .set-search-wrap {
+        max-width: none;
+        flex: 1 1 150px;
+    }
+}
+
+@media (max-width: 480px) {
+    .set-grid {
+        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+        gap: 0.4rem;
+    }
 }
