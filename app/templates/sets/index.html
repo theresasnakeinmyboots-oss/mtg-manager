@@ -14,24 +14,69 @@
                 {% endfor %}
             </select>
 
-            <div class="set-search-wrap">
-                <div class="set-chips" id="setChips"></div>
-                <div class="set-input-row">
-                    <input type="text" id="setSearch" placeholder="Add a set…" autocomplete="off" class="search-input" style="width:100%;box-sizing:border-box;">
-                    <div id="setDropdown" class="set-dropdown" style="display:none;"></div>
-                </div>
+            <div class="set-multiselect-wrap">
+                <select id="setSelect" multiple data-placeholder="Select sets…">
+                    {% for code, name in all_sets %}
+                    <option value="{{ code }}" {% if code in set_codes %}selected{% endif %}>{{ name }} ({{ code }})</option>
+                    {% endfor %}
+                </select>
             </div>
+            <button id="viewSetsBtn" class="btn btn-primary btn-sm">View</button>
 
             {% if groups %}
-            {% set ns = namespace(total_cards=0, total_owned=0) %}
+            {% set ns = namespace(total_cards=0, total_owned=0, missing=0) %}
             {% for g in groups %}
                 {% set ns.total_cards = ns.total_cards + g.cards|length %}
                 {% set ns.total_owned = ns.total_owned + (g.cards|selectattr('owned_count','gt',0)|list|length) %}
+                {% set ns.missing = ns.missing + (g.cards|selectattr('owned_count','equalto',0)|list|length) %}
             {% endfor %}
             <span class="total-count">{{ ns.total_cards }} cards · {{ ns.total_owned }} owned</span>
+            {% if ns.missing > 0 %}
+            <button id="addAllMissingBtn" class="btn btn-secondary btn-sm">+ All missing</button>
+            {% endif %}
+            <button id="purchaseListBtn" class="btn btn-primary btn-sm" style="display:none;">Purchase list (<span id="purchaseCount">0</span>)</button>
             {% endif %}
         </div>
     </div>
+
+    {% if set_codes %}
+    <form method="GET" class="set-filter-bar">
+        {% for code in set_codes %}<input type="hidden" name="set" value="{{ code }}">{% endfor %}
+        {% if collection_id %}<input type="hidden" name="coll" value="{{ collection_id }}">{% endif %}
+        <select name="color">
+            <option value="">Any colour</option>
+            <option value="W" {% if filter_color == 'W' %}selected{% endif %}>White</option>
+            <option value="U" {% if filter_color == 'U' %}selected{% endif %}>Blue</option>
+            <option value="B" {% if filter_color == 'B' %}selected{% endif %}>Black</option>
+            <option value="R" {% if filter_color == 'R' %}selected{% endif %}>Red</option>
+            <option value="G" {% if filter_color == 'G' %}selected{% endif %}>Green</option>
+            <option value="multicolor" {% if filter_color == 'multicolor' %}selected{% endif %}>Multicolour</option>
+            <option value="colorless" {% if filter_color == 'colorless' %}selected{% endif %}>Colourless</option>
+        </select>
+        <select name="type">
+            <option value="">Any type</option>
+            <option value="Creature" {% if filter_type == 'Creature' %}selected{% endif %}>Creature</option>
+            <option value="Instant" {% if filter_type == 'Instant' %}selected{% endif %}>Instant</option>
+            <option value="Sorcery" {% if filter_type == 'Sorcery' %}selected{% endif %}>Sorcery</option>
+            <option value="Enchantment" {% if filter_type == 'Enchantment' %}selected{% endif %}>Enchantment</option>
+            <option value="Artifact" {% if filter_type == 'Artifact' %}selected{% endif %}>Artifact</option>
+            <option value="Land" {% if filter_type == 'Land' %}selected{% endif %}>Land</option>
+            <option value="Planeswalker" {% if filter_type == 'Planeswalker' %}selected{% endif %}>Planeswalker</option>
+        </select>
+        <select name="rarity">
+            <option value="">Any rarity</option>
+            <option value="common" {% if filter_rarity == 'common' %}selected{% endif %}>Common</option>
+            <option value="uncommon" {% if filter_rarity == 'uncommon' %}selected{% endif %}>Uncommon</option>
+            <option value="rare" {% if filter_rarity == 'rare' %}selected{% endif %}>Rare</option>
+            <option value="mythic" {% if filter_rarity == 'mythic' %}selected{% endif %}>Mythic</option>
+        </select>
+        <label class="foil-check"><input type="checkbox" name="foil" value="foil" {% if filter_foil %}checked{% endif %}> Foil only</label>
+        <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+        {% if filter_color or filter_type or filter_rarity or filter_foil %}
+        <a href="/sets?{% for code in set_codes %}set={{ code }}&{% endfor %}{% if collection_id %}coll={{ collection_id }}{% endif %}" class="btn btn-secondary btn-sm">Clear</a>
+        {% endif %}
+    </form>
+    {% endif %}
 
     {% if groups %}
         {% for group in groups %}
@@ -40,7 +85,7 @@
             {% if group.cards %}
             <div class="set-grid">
                 {% for card in group.cards %}
-                <div class="set-card-thumb {% if card.owned_count == 0 %}unowned{% endif %}">
+                <div class="set-card-thumb {% if card.owned_count == 0 %}unowned{% endif %}" data-name="{{ card.name | e }}" data-set-name="{{ group.set_name | e }}" style="cursor:pointer;">
                     {% if card.collection_row_id %}
                     <a href="/collection/{{ card.collection_row_id }}">
                     {% endif %}
@@ -71,132 +116,165 @@
 
 </div>
 
+<!-- Wants list modal -->
+<div id="wantsModal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:560px;">
+        <span class="modal-close" id="wantsModalClose">&times;</span>
+        <h2>Purchase List</h2>
+        <div style="display:flex;gap:1.5rem;margin:0.6rem 0 0.75rem;font-size:0.85rem;">
+            <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;">
+                <input type="checkbox" id="fmtX"> Include ×
+            </label>
+            <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;">
+                <input type="checkbox" id="fmtSet" checked> Include set name
+            </label>
+        </div>
+        <textarea id="wantsText" readonly style="width:100%;height:300px;resize:vertical;background:var(--surface);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:0.6rem;font-family:monospace;font-size:0.8rem;box-sizing:border-box;"></textarea>
+        <div style="display:flex;gap:0.75rem;margin-top:0.75rem;">
+            <button id="wantsCopyBtn" class="btn btn-primary btn-sm">Copy to clipboard</button>
+            <button id="wantsDownloadBtn" class="btn btn-secondary btn-sm">Download .txt</button>
+        </div>
+    </div>
+</div>
+
 <script>
-const allSets = {{ all_sets | tojson }};
-// Selected set codes driven from URL; chips rendered on load
-let selectedCodes = {{ set_codes | tojson }};
-
-function currentUrl() { return new URL(window.location); }
-
-function navigate() {
-    const url = currentUrl();
-    url.searchParams.delete('set');
-    selectedCodes.forEach(c => url.searchParams.append('set', c));
-    window.location = url;
-}
-
 function switchCollection(val) {
-    const url = currentUrl();
+    const url = new URL(window.location);
     if (val) url.searchParams.set('coll', val);
     else url.searchParams.delete('coll');
     window.location = url;
 }
 
-// ── Chips ────────────────────────────────────────────────────────
-const chipsEl = document.getElementById('setChips');
-const setNameMap = Object.fromEntries(allSets);
-
-function renderChips() {
-    chipsEl.innerHTML = '';
-    selectedCodes.forEach(code => {
-        const chip = document.createElement('span');
-        chip.className = 'set-chip';
-        chip.textContent = setNameMap[code] || code;
-        const x = document.createElement('button');
-        x.className = 'set-chip-remove';
-        x.textContent = '×';
-        x.setAttribute('aria-label', `Remove ${code}`);
-        x.addEventListener('click', () => {
-            selectedCodes = selectedCodes.filter(c => c !== code);
-            navigate();
-        });
-        chip.appendChild(x);
-        chipsEl.appendChild(chip);
-    });
+function navigateToSets(codes) {
+    const url = new URL(window.location);
+    url.searchParams.delete('set');
+    codes.forEach(c => url.searchParams.append('set', c));
+    window.location = url;
 }
 
-renderChips();
+// Initialise the MultiSelect library on our <select>
+const ms = new MultiSelect('#setSelect', {
+    selectAll: false,
+    listAll: false,
+});
 
-// ── Dropdown ─────────────────────────────────────────────────────
-const searchInput = document.getElementById('setSearch');
-const dropdown = document.getElementById('setDropdown');
+document.getElementById('viewSetsBtn').addEventListener('click', () => {
+    navigateToSets(ms.selectedValues);
+});
 
-function buildDropdown(q) {
-    dropdown.innerHTML = '';
-    const matches = allSets.filter(([code, name]) => {
-        if (!q) return true;
-        return name.toLowerCase().includes(q) || code.toLowerCase().includes(q);
-    }).slice(0, 50);
+// ── Purchase list ─────────────────────────────────────────────────
+{% if groups %}
+const unownedCards = [
+    {% for g in groups %}{% for card in g.cards %}{% if card.owned_count == 0 %}
+    { name: {{ card.name | tojson }}, setName: {{ g.set_name | tojson }} },
+    {% endif %}{% endfor %}{% endfor %}
+];
 
-    if (!matches.length) { dropdown.style.display = 'none'; return; }
+// selected: Map from "name|setName" → {name, setName}
+const selected = new Map();
 
-    matches.forEach(([code, name]) => {
-        const div = document.createElement('div');
-        div.className = 'set-dropdown-item' + (selectedCodes.includes(code) ? ' selected' : '');
-        const cb = document.createElement('span');
-        cb.className = 'set-dropdown-check';
-        cb.textContent = selectedCodes.includes(code) ? '✓' : '';
-        div.appendChild(cb);
-        const label = document.createElement('span');
-        label.textContent = `${name} (${code})`;
-        div.appendChild(label);
-        div.addEventListener('click', e => {
-            if (selectedCodes.includes(code)) {
-                selectedCodes = selectedCodes.filter(c => c !== code);
-            } else {
-                selectedCodes = [...selectedCodes, code];
-            }
-            if (e.ctrlKey || e.metaKey) {
-                // Stay open — update checkmarks and chips without navigating
-                renderChips();
-                buildDropdown(searchInput.value.toLowerCase().trim());
-            } else {
-                navigate();
-            }
-        });
-        dropdown.appendChild(div);
-    });
-    dropdown.style.display = 'block';
+function updatePurchaseBtn() {
+    const btn = document.getElementById('purchaseListBtn');
+    const count = document.getElementById('purchaseCount');
+    if (!btn) return;
+    count.textContent = selected.size;
+    btn.style.display = selected.size > 0 ? '' : 'none';
 }
 
-searchInput.addEventListener('focus', () => {
-    buildDropdown(searchInput.value.toLowerCase().trim());
-});
-
-searchInput.addEventListener('input', () => {
-    buildDropdown(searchInput.value.toLowerCase().trim());
-});
-
-document.addEventListener('click', e => {
-    if (!e.target.closest('.set-search-wrap')) dropdown.style.display = 'none';
-});
-
-searchInput.addEventListener('keydown', e => {
-    const items = dropdown.querySelectorAll('.set-dropdown-item');
-    const active = dropdown.querySelector('.set-dropdown-item.active');
-    if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        const next = active ? active.nextElementSibling : items[0];
-        if (active) active.classList.remove('active');
-        if (next) next.classList.add('active');
-    } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        const prev = active ? active.previousElementSibling : items[items.length - 1];
-        if (active) active.classList.remove('active');
-        if (prev) prev.classList.add('active');
-    } else if (e.key === 'Enter') {
-        if (active) {
-            // Enter always navigates (same as plain click)
-            const syntheticClick = new MouseEvent('click', { bubbles: true });
-            active.dispatchEvent(syntheticClick);
-        } else {
-            navigate();
-        }
-    } else if (e.key === 'Escape') {
-        dropdown.style.display = 'none';
-        navigate();
+function setCardSelected(thumb, name, setName, on) {
+    const key = `${name}|${setName}`;
+    if (on) {
+        selected.set(key, { name, setName });
+        thumb.classList.add('selected');
+    } else {
+        selected.delete(key);
+        thumb.classList.remove('selected');
     }
+    updatePurchaseBtn();
+}
+
+// Click any card thumb to toggle selection
+// Prevent inner <a> from navigating so the whole thumb acts as a toggle
+document.querySelectorAll('.set-card-thumb a').forEach(a => {
+    a.addEventListener('click', e => e.preventDefault());
 });
+document.querySelectorAll('.set-card-thumb').forEach(thumb => {
+    thumb.addEventListener('click', () => {
+        const name = thumb.dataset.name;
+        const setName = thumb.dataset.setName;
+        setCardSelected(thumb, name, setName, !thumb.classList.contains('selected'));
+    });
+});
+
+// + All missing: select every unowned card
+const addAllBtn = document.getElementById('addAllMissingBtn');
+if (addAllBtn) {
+    addAllBtn.addEventListener('click', () => {
+        document.querySelectorAll('.set-card-thumb.unowned').forEach(thumb => {
+            setCardSelected(thumb, thumb.dataset.name, thumb.dataset.setName, true);
+        });
+    });
+}
+
+// Purchase list modal
+const purchaseListBtn = document.getElementById('purchaseListBtn');
+if (purchaseListBtn) {
+    const wantsModal = document.getElementById('wantsModal');
+    const wantsText = document.getElementById('wantsText');
+
+    function renderWantsList() {
+        const useX   = document.getElementById('fmtX').checked;
+        const useSet = document.getElementById('fmtSet').checked;
+        const seen = new Set();
+        const lines = [...selected.values()]
+            .filter(c => {
+                const key = `${c.name}|${c.setName}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            })
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map(c => {
+                let line = useX ? `1x ${c.name}` : `1 ${c.name}`;
+                if (useSet) line += ` (${c.setName})`;
+                return line;
+            });
+        wantsText.value = lines.join('\n');
+    }
+
+    purchaseListBtn.addEventListener('click', () => {
+        renderWantsList();
+        wantsModal.style.display = 'block';
+    });
+
+    document.getElementById('fmtX').addEventListener('change', renderWantsList);
+    document.getElementById('fmtSet').addEventListener('change', renderWantsList);
+
+    document.getElementById('wantsModalClose').addEventListener('click', () => {
+        wantsModal.style.display = 'none';
+    });
+    wantsModal.addEventListener('click', e => {
+        if (e.target === wantsModal) wantsModal.style.display = 'none';
+    });
+
+    document.getElementById('wantsCopyBtn').addEventListener('click', () => {
+        navigator.clipboard.writeText(wantsText.value).then(() => {
+            const btn = document.getElementById('wantsCopyBtn');
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = 'Copy to clipboard'; }, 2000);
+        });
+    });
+
+    document.getElementById('wantsDownloadBtn').addEventListener('click', () => {
+        const blob = new Blob([wantsText.value], { type: 'text/plain' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'purchase-list.txt';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    });
+}
+{% endif %}
 
 // ── Hover zoom ────────────────────────────────────────────────────
 (function () {

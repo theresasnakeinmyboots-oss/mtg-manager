@@ -37,6 +37,149 @@ SORT_COLS = {
     'rarity': 'k.rarity, c.name',
 }
 
+import re as _re
+
+_COLOR_MAP = {
+    'white': 'W', 'blue': 'U', 'black': 'B', 'red': 'R', 'green': 'G',
+    'w': 'W', 'u': 'U', 'b': 'B', 'r': 'R', 'g': 'G',
+}
+_CMC_OPS = {'>=': '>=', '<=': '<=', '>': '>', '<': '<', '=': '=', ':': '='}
+
+def _term_to_sql(k, v):
+    """Convert a single key:value token to (sql_fragment, [params]).
+    Returns (None, []) if unrecognised."""
+    if k in ('name', 'n'):
+        return 'c.name LIKE ?', [f'%{v}%']
+    if k in ('type', 't'):
+        return 'k.type_line LIKE ?', [f'%{v}%']
+    if k in ('oracle', 'o', 'text', 'rules'):
+        return 'k.oracle_text LIKE ?', [f'%{v}%']
+    if k in ('color', 'colour', 'c'):
+        vl = v.lower()
+        if vl in ('multicolor', 'multicolour', 'm'):
+            return 'json_array_length(COALESCE(k.colors, "[]")) > 1', []
+        if vl in ('colorless', 'colourless'):
+            return 'json_array_length(COALESCE(k.colors, "[]")) = 0 AND k.type_line NOT LIKE "%Land%"', []
+        code = _COLOR_MAP.get(vl, v.upper())
+        return 'COALESCE(k.colors, "[]") LIKE ?', [f'%"{code}"%']
+    if k in ('rarity', 'r'):
+        rarity_map = {'c': 'common', 'u': 'uncommon', 'r': 'rare', 'm': 'mythic'}
+        return 'k.rarity = ?', [rarity_map.get(v.lower(), v.lower())]
+    if k in ('set', 's', 'edition', 'e'):
+        return 'UPPER(c.edition) = ?', [v.upper()]
+    if k in ('cmc', 'mv', 'manavalue'):
+        m = _re.match(r'([><=]{1,2})?(\d+(?:\.\d+)?)', v)
+        if m:
+            op = _CMC_OPS.get(m.group(1) or '=', '=')
+            return f'COALESCE(k.cmc, 0) {op} ?', [float(m.group(2))]
+    if k in ('power', 'pow'):
+        m = _re.match(r'([><=]{1,2})?(\d+)', v)
+        if m:
+            op = _CMC_OPS.get(m.group(1) or '=', '=')
+            return f'CAST(k.power AS INTEGER) {op} ?', [int(m.group(2))]
+    if k in ('toughness', 'tou'):
+        m = _re.match(r'([><=]{1,2})?(\d+)', v)
+        if m:
+            op = _CMC_OPS.get(m.group(1) or '=', '=')
+            return f'CAST(k.toughness AS INTEGER) {op} ?', [int(m.group(2))]
+    return None, []
+
+
+def parse_advanced_query(q, where, params):
+    """Parse Scryfall-style query string with AND/OR support.
+
+    Terms separated by 'or' (case-insensitive) are grouped into OR blocks;
+    everything else is implicitly AND.  Example:
+        type:ninja o:ninjato or o:sneak
+    becomes:
+        AND type_line LIKE '%ninja%' AND (oracle_text LIKE '%ninjato%' OR oracle_text LIKE '%sneak%')
+    """
+    # Tokenise: key:value, key:"quoted value", bare word
+    raw_tokens = _re.findall(r'(\w+):(\"[^\"]*\"|[^\s]+)|(\S+)', q)
+
+    # Build list of ('term', k, v) or ('or',) or ('bare', word)
+    parsed = []
+    for key_part, val_part, bare in raw_tokens:
+        if key_part:
+            parsed.append(('term', key_part.lower(), val_part.strip('"')))
+        elif bare.lower() == 'or':
+            parsed.append(('or',))
+        else:
+            parsed.append(('bare', bare))
+
+    # Group into AND-level chunks; consecutive items separated by 'or' form one OR group
+    # e.g. [term, or, term, or, term, AND_implicit, term] → [[t,t,t], [t]]
+    and_groups = []
+    current_or = []
+    for token in parsed:
+        if token[0] == 'or':
+            # continue accumulating into current OR group
+            pass
+        else:
+            # Check if previous token was 'or' — if not, start a new AND group
+            idx = parsed.index(token)  # safe because we process linearly below
+            current_or.append(token)
+            and_groups.append(current_or)
+            current_or = []
+
+    # Re-implement with a proper linear pass
+    and_groups = []
+    or_buf = []
+    prev_was_or = False
+    for token in parsed:
+        if token[0] == 'or':
+            prev_was_or = True
+            continue
+        if prev_was_or and or_buf:
+            or_buf.append(token)
+        else:
+            if or_buf:
+                and_groups.append(or_buf)
+            or_buf = [token]
+        prev_was_or = False
+    if or_buf:
+        and_groups.append(or_buf)
+
+    # Convert each AND group to SQL
+    for group in and_groups:
+        or_frags = []
+        or_params = []
+        for token in group:
+            if token[0] == 'term':
+                sql, p = _term_to_sql(token[1], token[2])
+                if sql:
+                    or_frags.append(sql)
+                    or_params.extend(p)
+            elif token[0] == 'bare':
+                or_frags.append('c.name LIKE ?')
+                or_params.append(f'%{token[1]}%')
+
+        if not or_frags:
+            continue
+        if len(or_frags) == 1:
+            where.append(or_frags[0])
+            params.extend(or_params)
+        else:
+            where.append('(' + ' OR '.join(or_frags) + ')')
+            params.extend(or_params)
+
+
+def build_order_parts(sorts_dirs):
+    seen = set()
+    parts = []
+    for s, d in sorts_dirs:
+        if not s or s not in SORT_COLS:
+            continue
+        col = SORT_COLS[s]
+        if d == 'desc':
+            first, *rest = col.split(', ')
+            first = first.replace(' DESC', '').replace(' ASC', '') + ' DESC'
+            col = ', '.join([first] + rest)
+        if col not in seen:
+            seen.add(col)
+            parts.append(col)
+    return parts
+
 @collection_bp.route('/test-keyrune')
 def test_keyrune():
     return send_file(Path(__file__).parent.parent.parent / 'test_keyrune.html')
@@ -70,13 +213,37 @@ def browse():
         where_clause += ' AND c.collection_id = ?'
         params.append(collection_id)
 
+    adv = request.args.get('adv', '').strip() == '1'
     search_q = request.args.get('q', '').strip()
-    if search_q:
+    search_type = request.args.get('search_type', '').strip()
+    search_rules = request.args.get('search_rules', '').strip()
+
+    adv_clauses = []
+    adv_params = []
+    if adv and search_q:
+        parse_advanced_query(search_q, adv_clauses, adv_params)
+    elif search_q:
         where_clause += ' AND c.name LIKE ?'
         params.append(f'%{search_q}%')
 
+    if not adv:
+        if search_type:
+            where_clause += ' AND k.type_line LIKE ?'
+            params.append(f'%{search_type}%')
+        if search_rules:
+            where_clause += ' AND k.oracle_text LIKE ?'
+            params.append(f'%{search_rules}%')
+
+    if adv_clauses:
+        where_clause += ' AND ' + ' AND '.join(adv_clauses)
+        params.extend(adv_params)
+
     color = request.args.get('color', '').strip()
-    if color:
+    if color == 'multicolor':
+        where_clause += ' AND json_array_length(COALESCE(k.colors, "[]")) > 1'
+    elif color == 'colorless':
+        where_clause += ' AND json_array_length(COALESCE(k.colors, "[]")) = 0 AND (k.type_line NOT LIKE "%Land%" OR k.type_line IS NULL)'
+    elif color:
         where_clause += ' AND COALESCE(k.colors, "[]") LIKE ?'
         params.append(f'%"{color}"%')
 
@@ -85,10 +252,11 @@ def browse():
         where_clause += ' AND k.type_line LIKE ?'
         params.append(f'%{card_type}%')
 
-    set_code = request.args.get('set', '').strip()
-    if set_code:
-        where_clause += ' AND c.edition LIKE ?'
-        params.append(f'%{set_code}%')
+    filter_sets = [s.strip().upper() for s in request.args.getlist('set') if s.strip()]
+    if filter_sets:
+        placeholders = ','.join('?' * len(filter_sets))
+        where_clause += f' AND UPPER(c.edition) IN ({placeholders})'
+        params.extend(filter_sets)
 
     condition = request.args.get('condition', '').strip()
     if condition:
@@ -103,19 +271,15 @@ def browse():
     sort1 = request.args.get('sort1', 'name').strip()
     sort2 = request.args.get('sort2', '').strip()
     sort3 = request.args.get('sort3', '').strip()
+    dir1 = 'desc' if request.args.get('dir1', '').strip() == 'desc' else 'asc'
+    dir2 = 'desc' if request.args.get('dir2', '').strip() == 'desc' else 'asc'
+    dir3 = 'desc' if request.args.get('dir3', '').strip() == 'desc' else 'asc'
     # keep legacy ?sort= param working
     if 'sort' in request.args and 'sort1' not in request.args:
         sort1 = request.args.get('sort', 'name').strip()
 
-    parts = [SORT_COLS.get(s) for s in (sort1, sort2, sort3) if s and s in SORT_COLS]
-    # deduplicate while preserving order
-    seen = set()
-    deduped = []
-    for p in parts:
-        if p not in seen:
-            seen.add(p)
-            deduped.append(p)
-    order_clause = 'ORDER BY ' + ', '.join(deduped) if deduped else 'ORDER BY c.name'
+    parts = build_order_parts([(sort1, dir1), (sort2, dir2), (sort3, dir3)])
+    order_clause = 'ORDER BY ' + ', '.join(parts) if parts else 'ORDER BY c.name'
 
     query = f'''
         SELECT MIN(c.id) as id, c.name, c.edition, c.condition, SUM(c.count) as count, c.foil, c.card_number,
@@ -147,6 +311,13 @@ def browse():
     cursor = db.execute(count_query, params)
     total = cursor.fetchone()[0]
 
+    all_sets = [
+        (row['set_code'], row['set_name'])
+        for row in db.execute(
+            'SELECT DISTINCT set_code, set_name FROM scryfall_bulk ORDER BY set_name'
+        ).fetchall()
+    ]
+
     db.close()
 
     return render_template('collection/index.html',
@@ -154,16 +325,20 @@ def browse():
                          page=page,
                          per_page=per_page,
                          total=total,
-                         sort1=sort1,
-                         sort2=sort2,
-                         sort3=sort3,
+                         sort1=sort1, dir1=dir1,
+                         sort2=sort2, dir2=dir2,
+                         sort3=sort3, dir3=dir3,
                          search_q=search_q,
+                         search_type=search_type,
+                         search_rules=search_rules,
+                         adv=adv,
                          filter_color=color,
                          filter_type=card_type,
-                         filter_set=set_code,
+                         filter_sets=filter_sets,
                          filter_condition=condition,
                          filter_foil=foil,
                          all_collections=all_collections,
+                         all_sets=all_sets,
                          active_collection=active_collection,
                          collection_id=collection_id or '')
 
@@ -180,22 +355,43 @@ def cards_json():
     if collection_id:
         where_clause += ' AND c.collection_id = ?'
         params.append(collection_id)
+    adv = request.args.get('adv', '').strip() == '1'
     search_q = request.args.get('q', '').strip()
-    if search_q:
+    search_type = request.args.get('search_type', '').strip()
+    search_rules = request.args.get('search_rules', '').strip()
+    adv_clauses = []; adv_params = []
+    if adv and search_q:
+        parse_advanced_query(search_q, adv_clauses, adv_params)
+    elif search_q:
         where_clause += ' AND c.name LIKE ?'
         params.append(f'%{search_q}%')
+    if not adv:
+        if search_type:
+            where_clause += ' AND k.type_line LIKE ?'
+            params.append(f'%{search_type}%')
+        if search_rules:
+            where_clause += ' AND k.oracle_text LIKE ?'
+            params.append(f'%{search_rules}%')
+    if adv_clauses:
+        where_clause += ' AND ' + ' AND '.join(adv_clauses)
+        params.extend(adv_params)
     color = request.args.get('color', '').strip()
-    if color:
+    if color == 'multicolor':
+        where_clause += ' AND json_array_length(COALESCE(k.colors, "[]")) > 1'
+    elif color == 'colorless':
+        where_clause += ' AND json_array_length(COALESCE(k.colors, "[]")) = 0 AND (k.type_line NOT LIKE "%Land%" OR k.type_line IS NULL)'
+    elif color:
         where_clause += ' AND COALESCE(k.colors, "[]") LIKE ?'
         params.append(f'%"{color}"%')
     card_type = request.args.get('type', '').strip()
     if card_type:
         where_clause += ' AND k.type_line LIKE ?'
         params.append(f'%{card_type}%')
-    set_code = request.args.get('set', '').strip()
-    if set_code:
-        where_clause += ' AND c.edition LIKE ?'
-        params.append(f'%{set_code}%')
+    filter_sets = [s.strip().upper() for s in request.args.getlist('set') if s.strip()]
+    if filter_sets:
+        placeholders = ','.join('?' * len(filter_sets))
+        where_clause += f' AND UPPER(c.edition) IN ({placeholders})'
+        params.extend(filter_sets)
     condition = request.args.get('condition', '').strip()
     if condition:
         where_clause += ' AND c.condition = ?'
@@ -208,12 +404,11 @@ def cards_json():
     sort1 = request.args.get('sort1', 'name').strip()
     sort2 = request.args.get('sort2', '').strip()
     sort3 = request.args.get('sort3', '').strip()
-    parts = [SORT_COLS.get(s) for s in (sort1, sort2, sort3) if s and s in SORT_COLS]
-    seen = set(); deduped = []
-    for p in parts:
-        if p not in seen:
-            seen.add(p); deduped.append(p)
-    order_clause = 'ORDER BY ' + ', '.join(deduped) if deduped else 'ORDER BY c.name'
+    dir1 = 'desc' if request.args.get('dir1', '').strip() == 'desc' else 'asc'
+    dir2 = 'desc' if request.args.get('dir2', '').strip() == 'desc' else 'asc'
+    dir3 = 'desc' if request.args.get('dir3', '').strip() == 'desc' else 'asc'
+    parts = build_order_parts([(sort1, dir1), (sort2, dir2), (sort3, dir3)])
+    order_clause = 'ORDER BY ' + ', '.join(parts) if parts else 'ORDER BY c.name'
 
     cursor = db.execute(f'''
         SELECT MIN(c.id) as id, c.name, c.edition, c.condition, SUM(c.count) as count, c.foil,
@@ -294,7 +489,7 @@ def card_detail(card_id):
             SELECT scryfall_id, set_code, set_name, collector_number, image_uri_normal, rarity
             FROM scryfall_bulk
             WHERE name = ?
-            ORDER BY set_code, CAST(collector_number AS INTEGER), collector_number
+            ORDER BY set_name, CAST(collector_number AS INTEGER), collector_number
         ''', (card['name'],))
         alternatives = [dict(r) for r in cursor.fetchall()]
 
