@@ -10,6 +10,12 @@ def index():
     set_codes = [s.strip().upper() for s in request.args.getlist('set') if s.strip()]
     collection_id = request.args.get('coll', type=int)
 
+    # Filters
+    filter_color = request.args.get('color', '').strip()
+    filter_type  = request.args.get('type', '').strip()
+    filter_rarity = request.args.get('rarity', '').strip()
+    filter_foil  = request.args.get('foil', '').strip()
+
     # All sets from bulk data, ordered by name
     all_sets = [
         (row['set_code'], row['set_name'])
@@ -32,8 +38,29 @@ def index():
     if set_codes:
         owned_where = 'AND c.collection_id = ?' if collection_id else ''
 
+        # Build extra WHERE fragments for card-level filters (applied to bulk data)
+        card_filters = ''
+        card_filter_params = []
+
+        if filter_color == 'multicolor':
+            card_filters += ' AND json_array_length(COALESCE(b.colors, "[]")) > 1'
+        elif filter_color == 'colorless':
+            card_filters += ' AND json_array_length(COALESCE(b.colors, "[]")) = 0 AND b.type_line NOT LIKE "%Land%"'
+        elif filter_color:
+            card_filters += ' AND COALESCE(b.colors, "[]") LIKE ?'
+            card_filter_params.append(f'%"{filter_color}"%')
+
+        if filter_type:
+            card_filters += ' AND b.type_line LIKE ?'
+            card_filter_params.append(f'%{filter_type}%')
+
+        if filter_rarity:
+            card_filters += ' AND b.rarity = ?'
+            card_filter_params.append(filter_rarity)
+
         for code in set_codes:
-            params = ([collection_id, code] if collection_id else [code])
+            base_params = ([collection_id, code] if collection_id else [code])
+            params = base_params + card_filter_params
             rows = db.execute(f'''
                 SELECT
                     b.scryfall_id,
@@ -45,14 +72,19 @@ def index():
                     b.rarity,
                     b.colors,
                     COALESCE(SUM(c.count), 0) as owned_count,
-                    MIN(c.id) as collection_row_id
+                    MIN(c.id) as collection_row_id,
+                    c.foil
                 FROM scryfall_bulk b
                 LEFT JOIN cards k ON b.scryfall_id = k.scryfall_id
                 LEFT JOIN collection c ON c.card_id = k.id {owned_where}
-                WHERE b.set_code = ?
+                WHERE b.set_code = ?{card_filters}
                 GROUP BY b.scryfall_id
                 ORDER BY CAST(b.collector_number AS INTEGER), b.collector_number
             ''', params).fetchall()
+
+            # foil filter is post-query (foil is on collection, not bulk)
+            if filter_foil:
+                rows = [r for r in rows if r['foil'] == 'foil' or r['owned_count'] == 0]
 
             groups.append({
                 'set_code': code,
@@ -66,4 +98,8 @@ def index():
                            all_collections=all_collections,
                            groups=groups,
                            set_codes=set_codes,
-                           collection_id=collection_id or '')
+                           collection_id=collection_id or '',
+                           filter_color=filter_color,
+                           filter_type=filter_type,
+                           filter_rarity=filter_rarity,
+                           filter_foil=filter_foil)

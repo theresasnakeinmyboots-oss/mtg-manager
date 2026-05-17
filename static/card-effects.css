@@ -1,0 +1,174 @@
+/* ── MTG Card Holographic Effects ─────────────────────────────────
+   Adapted from https://github.com/simeydotme/pokemon-cards-css
+   ---------------------------------------------------------------- */
+
+/* ── Base 3D card structure ─────────────────────────────────────── */
+.card-thumb {
+    --rotate-x: 0deg;
+    --rotate-y: 0deg;
+    --card-scale: 1;
+    --pointer-x: 50%;
+    --pointer-y: 50%;
+    --pointer-from-center: 0;
+    --pointer-from-top: 0.5;
+    --pointer-from-left: 0.5;
+    --background-x: 50%;
+    --background-y: 50%;
+
+    perspective: 600px;
+    /* Do NOT use transform-style: preserve-3d — causes overflow clipping bugs */
+}
+
+/* The inner wrapper does the actual 3D tilt */
+.card-thumb-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    transform:
+        perspective(600px)
+        rotateX(var(--rotate-x))
+        rotateY(var(--rotate-y))
+        scale(var(--card-scale));
+    transition: transform 0.6s ease, box-shadow 0.6s ease;
+    will-change: transform;
+}
+
+.card-thumb.interacting .card-thumb-inner {
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+    box-shadow:
+        0 20px 40px rgba(0,0,0,0.6),
+        0 0 20px rgba(0,0,0,0.3);
+}
+
+.card-thumb-inner img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 10px;
+    display: block;
+}
+
+/* Shine + glare layers */
+.card-shine,
+.card-glare {
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    pointer-events: none;
+}
+
+/* ── Glare — specular highlight ─────────────────────────────────── */
+.card-glare {
+    opacity: 0;
+    transition: opacity 0.3s;
+    background: radial-gradient(
+        farthest-corner circle at var(--pointer-x) var(--pointer-y),
+        rgba(255,255,255,0.35) 0%,
+        rgba(255,255,255,0.15) 20%,
+        transparent 60%
+    );
+    mix-blend-mode: screen;
+    z-index: 4;
+}
+
+.card-thumb.interacting .card-glare {
+    opacity: 1;
+}
+
+/* ── Foil — full rainbow sweep ──────────────────────────────────── */
+.card-thumb[data-foil="1"] .card-shine {
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 3;
+    background:
+        repeating-linear-gradient(
+            0deg,
+            hsla(0,  100%,55%, 0.18) calc(var(--pointer-from-top)*100% +  0%),
+            hsla(45, 100%,55%, 0.18) calc(var(--pointer-from-top)*100% +  8%),
+            hsla(90, 100%,55%, 0.18) calc(var(--pointer-from-top)*100% + 16%),
+            hsla(180,100%,55%, 0.18) calc(var(--pointer-from-top)*100% + 24%),
+            hsla(225,100%,55%, 0.18) calc(var(--pointer-from-top)*100% + 32%),
+            hsla(270,100%,55%, 0.18) calc(var(--pointer-from-top)*100% + 40%),
+            hsla(0,  100%,55%, 0.18) calc(var(--pointer-from-top)*100% + 48%)
+        );
+    mix-blend-mode: screen;
+}
+
+.card-thumb[data-foil="1"].interacting .card-shine {
+    opacity: 1;
+}
+
+/* ── Holo (rare) — diagonal rainbow stripes ─────────────────────── */
+.card-thumb[data-holo="1"] .card-shine {
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 3;
+    background:
+        repeating-linear-gradient(
+            110deg,
+            hsla(0,  100%,55%, 0.15)  0%,
+            hsla(45, 100%,55%, 0.15)  8%,
+            hsla(90, 100%,55%, 0.15) 16%,
+            hsla(180,100%,55%, 0.15) 24%,
+            hsla(225,100%,55%, 0.15) 32%,
+            hsla(270,100%,55%, 0.15) 40%,
+            hsla(0,  100%,55%, 0.15) 48%
+        );
+    background-size: 700% 100%;
+    background-position: var(--background-x) var(--background-y);
+    mix-blend-mode: screen;
+}
+
+.card-thumb[data-holo="1"].interacting .card-shine {
+    opacity: 1;
+}
+
+/* ── Mythic — golden radial burst ───────────────────────────────── */
+.card-thumb[data-mythic="1"] .card-shine {
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 3;
+    background:
+        radial-gradient(
+            ellipse at var(--pointer-x) var(--pointer-y),
+            hsla(45, 100%,70%, 0.5)  0%,
+            hsla(25, 100%,60%, 0.3) 20%,
+            hsla(270,100%,60%, 0.2) 50%,
+            transparent 70%
+        ),
+        repeating-linear-gradient(
+            82deg,
+            hsla(0,  100%,55%, 0.1)  0%,
+            hsla(60, 100%,55%, 0.1) 14%,
+            hsla(120,100%,55%, 0.1) 28%,
+            hsla(180,100%,55%, 0.1) 42%,
+            hsla(240,100%,55%, 0.1) 56%,
+            hsla(300,100%,55%, 0.1) 70%,
+            hsla(0,  100%,55%, 0.1) 84%
+        );
+    mix-blend-mode: screen;
+    background-size: 200% 200%, 300% 300%;
+    background-position:
+        var(--background-x) var(--background-y),
+        calc(var(--background-x) * 0.5) calc(var(--background-y) * 0.5);
+}
+
+.card-thumb[data-mythic="1"].interacting .card-shine {
+    opacity: 1;
+}
+
+.card-thumb[data-mythic="1"].interacting .card-glare {
+    background: radial-gradient(
+        farthest-corner circle at var(--pointer-x) var(--pointer-y),
+        rgba(255,220,100,0.5)  0%,
+        rgba(255,180, 50,0.2) 25%,
+        transparent 60%
+    );
+}
+
+/* ── Count badge stays on top ───────────────────────────────────── */
+.card-thumb .thumb-count {
+    z-index: 10;
+}

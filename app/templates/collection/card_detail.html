@@ -13,10 +13,19 @@
             {% if card.image_uri %}
             {% set is_dfc = '/front/' in card.image_uri %}
             {% set back_uri = card.image_uri.replace('/front/', '/back/') if is_dfc else '' %}
-            <div class="card-flip-container{% if is_dfc %} is-dfc{% endif %}"
-                 {% if is_dfc %}data-front="{{ card.image_uri }}" data-back="{{ back_uri }}"{% endif %}>
-                <img class="card-detail-img" id="cardFaceImg" src="{{ card.image_uri }}" alt="{{ card.name }}">
-                {% if is_dfc %}<div class="card-flip-hint">Hover to flip</div>{% endif %}
+            <div class="card-thumb card-detail-thumb"
+                 data-foil="{{ '1' if card.foil else '0' }}"
+                 data-mythic="{{ '1' if card.rarity == 'mythic' else '0' }}"
+                 data-holo="{{ '1' if card.rarity in ('rare',) and not card.foil else '0' }}">
+                <div class="card-thumb-inner">
+                    <div class="card-flip-container{% if is_dfc %} is-dfc{% endif %}"
+                         {% if is_dfc %}data-front="{{ card.image_uri }}" data-back="{{ back_uri }}"{% endif %}>
+                        <img class="card-detail-img" id="cardFaceImg" src="{{ card.image_uri }}" alt="{{ card.name }}">
+                        {% if is_dfc %}<div class="card-flip-hint">Click to flip</div>{% endif %}
+                    </div>
+                    <div class="card-shine"></div>
+                    <div class="card-glare"></div>
+                </div>
             </div>
             {% else %}
             <div class="no-image-large">No Image Available</div>
@@ -188,11 +197,15 @@
 
 {% if alternatives %}
 <div class="alt-printings">
-    <h3 class="alt-printings-title">Other Printings <span class="alt-count">({{ alternatives|length }})</span></h3>
-    <div class="alt-grid">
+    <div class="alt-printings-header">
+        <h3 class="alt-printings-title">Other Printings <span class="alt-count" id="altCount">({{ alternatives|length }})</span></h3>
+        <input type="text" id="altFilter" class="alt-filter-input" placeholder="Filter by set…" autocomplete="off">
+    </div>
+    <div class="alt-carousel">
         {% for alt in alternatives %}
         <div class="alt-thumb {% if alt.scryfall_id == card.scryfall_id %}alt-current{% endif %}"
              data-scryfall-id="{{ alt.scryfall_id }}"
+             data-set-name="{{ alt.set_name|lower }}"
              title="{{ alt.set_name }} #{{ alt.collector_number }}">
             {% if alt.image_uri_normal %}
             <img src="{{ alt.image_uri_normal }}" alt="{{ card.name }} — {{ alt.set_name }}" loading="lazy">
@@ -267,24 +280,50 @@ document.querySelectorAll('.alt-switch-btn').forEach(btn => {
     });
 });
 
-// DFC flip on hover
+// Alt printings filter
+const altFilter = document.getElementById('altFilter');
+if (altFilter) {
+    const allThumbs = Array.from(document.querySelectorAll('.alt-thumb'));
+    const altCount = document.getElementById('altCount');
+    altFilter.addEventListener('input', () => {
+        const q = altFilter.value.trim().toLowerCase();
+        let visible = 0;
+        allThumbs.forEach(el => {
+            const match = !q || el.dataset.setName.includes(q);
+            el.style.display = match ? '' : 'none';
+            if (match) visible++;
+        });
+        altCount.textContent = q ? `(${visible} of ${allThumbs.length})` : `(${allThumbs.length})`;
+    });
+}
+
+// DFC flip on click
 const flipContainer = document.querySelector('.card-flip-container.is-dfc');
 if (flipContainer) {
     const img = document.getElementById('cardFaceImg');
     const front = flipContainer.dataset.front;
     const back = flipContainer.dataset.back;
+    const hint = flipContainer.querySelector('.card-flip-hint');
+    let showingBack = false;
     let backLoaded = false;
-    flipContainer.addEventListener('mouseenter', () => {
-        if (!backLoaded) {
-            const preload = new Image();
-            preload.onload = () => { backLoaded = true; img.src = back; };
-            preload.onerror = () => {};
-            preload.src = back;
+    flipContainer.style.cursor = 'pointer';
+    flipContainer.addEventListener('click', () => {
+        showingBack = !showingBack;
+        if (showingBack) {
+            if (!backLoaded) {
+                const preload = new Image();
+                preload.onload = () => { backLoaded = true; img.src = back; };
+                preload.onerror = () => {};
+                preload.src = back;
+            } else {
+                img.src = back;
+            }
+            if (hint) hint.textContent = 'Click to flip back';
         } else {
-            img.src = back;
+            img.src = front;
+            if (hint) hint.textContent = 'Click to flip';
         }
     });
-    flipContainer.addEventListener('mouseleave', () => { img.src = front; });
 }
 </script>
 {% endblock %}

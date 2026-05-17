@@ -16,28 +16,44 @@
                 </select>
             </div>
             <span class="total-count">{{ total }} card{% if total != 1 %}s{% endif %}</span>
-            <form method="GET" class="search-form">
+            <form method="GET" class="search-form" id="searchForm">
                 <input type="hidden" name="coll" value="{{ collection_id }}">
                 <input type="hidden" name="sort1" value="{{ sort1 }}">
+                <input type="hidden" name="dir1" value="{{ dir1 }}">
                 <input type="hidden" name="sort2" value="{{ sort2 }}">
+                <input type="hidden" name="dir2" value="{{ dir2 }}">
                 <input type="hidden" name="sort3" value="{{ sort3 }}">
+                <input type="hidden" name="dir3" value="{{ dir3 }}">
                 <input type="hidden" name="color" value="{{ filter_color }}">
                 <input type="hidden" name="type" value="{{ filter_type }}">
-                <input type="hidden" name="set" value="{{ filter_set }}">
+                {% for s in filter_sets %}<input type="hidden" name="set" value="{{ s }}">{% endfor %}
                 <input type="hidden" name="condition" value="{{ filter_condition }}">
                 {% if filter_foil %}<input type="hidden" name="foil" value="{{ filter_foil }}">{% endif %}
-                <input type="text" name="q" value="{{ search_q }}" placeholder="Search cards…" class="search-input">
+                {% if adv %}<input type="hidden" name="adv" value="1">{% endif %}
+                {% if not adv %}
+                <input type="hidden" name="search_type" value="{{ search_type }}">
+                <input type="hidden" name="search_rules" value="{{ search_rules }}">
+                {% endif %}
+                {% if adv %}
+                <input type="text" name="q" value="{{ search_q }}" placeholder="type:creature o:flying cmc>=4 …" class="search-input search-input-adv" title="Advanced search: name: type: o: color: rarity: set: cmc: power: toughness:">
+                {% else %}
+                <input type="text" name="q" value="{{ search_q }}" placeholder="Search card names…" class="search-input">
+                {% endif %}
             </form>
         </div>
         <div class="toolbar-right">
-            <button id="filterToggle" class="btn btn-secondary btn-sm">Filters{% if filter_color or filter_type or filter_set or filter_condition or filter_foil %} ●{% endif %}</button>
+            <button id="filterToggle" class="btn btn-secondary btn-sm">Filters{% if filter_color or filter_type or filter_sets or filter_condition or filter_foil %} ●{% endif %}</button>
             <div class="sort-controls">
                 <span class="sort-label">Sort:</span>
+                {% set sort_opts = [('name','Name'),('set','Set'),('count','Count'),('color','Colour'),('type','Type'),('cost','Cost'),('rarity','Rarity')] %}
                 <select class="sort-select" id="sort1" onchange="applySort()">
-                    {% set sort_opts = [('name','Name'),('set','Set'),('count','Count'),('color','Colour'),('type','Type'),('cost','Cost'),('rarity','Rarity')] %}
                     {% for val, label in sort_opts %}
                     <option value="{{ val }}" {% if sort1 == val %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
+                </select>
+                <select class="sort-dir" id="dir1" onchange="applySort()">
+                    <option value="asc" {% if dir1 != 'desc' %}selected{% endif %}>↑</option>
+                    <option value="desc" {% if dir1 == 'desc' %}selected{% endif %}>↓</option>
                 </select>
                 <select class="sort-select" id="sort2" onchange="applySort()">
                     <option value="" {% if not sort2 %}selected{% endif %}>then…</option>
@@ -45,25 +61,38 @@
                     <option value="{{ val }}" {% if sort2 == val %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
+                <select class="sort-dir" id="dir2" onchange="applySort()">
+                    <option value="asc" {% if dir2 != 'desc' %}selected{% endif %}>↑</option>
+                    <option value="desc" {% if dir2 == 'desc' %}selected{% endif %}>↓</option>
+                </select>
                 <select class="sort-select" id="sort3" onchange="applySort()">
                     <option value="" {% if not sort3 %}selected{% endif %}>then…</option>
                     {% for val, label in sort_opts %}
                     <option value="{{ val }}" {% if sort3 == val %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
+                <select class="sort-dir" id="dir3" onchange="applySort()">
+                    <option value="asc" {% if dir3 != 'desc' %}selected{% endif %}>↑</option>
+                    <option value="desc" {% if dir3 == 'desc' %}selected{% endif %}>↓</option>
+                </select>
             </div>
-            <a href="/collections" class="btn btn-secondary btn-sm">Collections</a>
+            <button type="button" id="advToggle" class="btn btn-secondary btn-sm{% if adv %} adv-active{% endif %}" title="Toggle advanced search">⚡ Adv</button>
+            {% if adv %}<button type="button" id="advHelpBtn" class="btn btn-secondary btn-sm" title="Advanced search syntax help">?</button>{% endif %}
             <button id="importBtn" class="btn btn-primary btn-sm">Import</button>
         </div>
     </div>
 
     <div id="filterPanel" class="filter-panel" style="display:none;">
-        <form method="GET" class="filter-form-inline">
+        <form method="GET" class="filter-form-inline" id="filterForm">
             <input type="hidden" name="q" value="{{ search_q }}">
             <input type="hidden" name="sort1" value="{{ sort1 }}">
+            <input type="hidden" name="dir1" value="{{ dir1 }}">
             <input type="hidden" name="sort2" value="{{ sort2 }}">
+            <input type="hidden" name="dir2" value="{{ dir2 }}">
             <input type="hidden" name="sort3" value="{{ sort3 }}">
+            <input type="hidden" name="dir3" value="{{ dir3 }}">
             <input type="hidden" name="coll" value="{{ collection_id }}">
+            {% if adv %}<input type="hidden" name="adv" value="1">{% endif %}
             <select name="color">
                 <option value="">Any colour</option>
                 <option value="W" {% if filter_color == 'W' %}selected{% endif %}>White</option>
@@ -71,6 +100,8 @@
                 <option value="B" {% if filter_color == 'B' %}selected{% endif %}>Black</option>
                 <option value="R" {% if filter_color == 'R' %}selected{% endif %}>Red</option>
                 <option value="G" {% if filter_color == 'G' %}selected{% endif %}>Green</option>
+                <option value="multicolor" {% if filter_color == 'multicolor' %}selected{% endif %}>Multicolour</option>
+                <option value="colorless" {% if filter_color == 'colorless' %}selected{% endif %}>Colourless</option>
             </select>
             <select name="type">
                 <option value="">Any type</option>
@@ -81,7 +112,13 @@
                 <option value="Artifact" {% if filter_type == 'Artifact' %}selected{% endif %}>Artifact</option>
                 <option value="Land" {% if filter_type == 'Land' %}selected{% endif %}>Land</option>
             </select>
-            <input type="text" name="set" value="{{ filter_set }}" placeholder="Set code…">
+            <div class="filter-set-wrap">
+                <select id="filterSetSelect" multiple data-placeholder="Any set…">
+                    {% for code, name in all_sets %}
+                    <option value="{{ code }}" {% if code in filter_sets %}selected{% endif %}>{{ name }} ({{ code }})</option>
+                    {% endfor %}
+                </select>
+            </div>
             <select name="condition">
                 <option value="">Any condition</option>
                 <option value="M" {% if filter_condition == 'M' %}selected{% endif %}>Mint</option>
@@ -92,22 +129,34 @@
                 <option value="D" {% if filter_condition == 'D' %}selected{% endif %}>Damaged</option>
             </select>
             <label class="foil-check"><input type="checkbox" name="foil" value="foil" {% if filter_foil %}checked{% endif %}> Foil only</label>
-            <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+            {% if not adv %}
+            <input type="text" name="search_type" value="{{ search_type }}" placeholder="Type contains…" class="search-input" style="width:140px;">
+            <input type="text" name="search_rules" value="{{ search_rules }}" placeholder="Rules text contains…" class="search-input" style="width:180px;">
+            {% endif %}
+            <button type="submit" class="btn btn-primary btn-sm" id="filterApplyBtn">Apply</button>
             <a href="/collection{% if collection_id %}?coll={{ collection_id }}{% endif %}" class="btn btn-secondary btn-sm">Clear</a>
         </form>
     </div>
 
     <div class="cards-grid-tight" id="cardsGrid">
         {% for card in cards %}
-        <a href="/collection/{{ card.id }}" class="card-thumb" title="{{ card.name }}{% if card.foil %} ✦{% endif %}">
-            {% if card.image_uri %}
-            <img src="{{ card.image_uri }}" alt="{{ card.name }}" loading="lazy">
-            {% else %}
-            <div class="no-image-thumb">{{ card.name }}</div>
-            {% endif %}
-            {% if card.count > 1 %}
-            <span class="thumb-count">×{{ card.count }}</span>
-            {% endif %}
+        <a href="/collection/{{ card.id }}" class="card-thumb"
+           title="{{ card.name }}{% if card.foil %} ✦{% endif %}"
+           data-foil="{{ '1' if card.foil else '0' }}"
+           data-mythic="{{ '1' if card.rarity == 'mythic' else '0' }}"
+           data-holo="{{ '1' if card.rarity in ('rare',) and not card.foil else '0' }}">
+            <div class="card-thumb-inner">
+                {% if card.image_uri %}
+                <img src="{{ card.image_uri }}" alt="{{ card.name }}" loading="lazy">
+                {% else %}
+                <div class="no-image-thumb">{{ card.name }}</div>
+                {% endif %}
+                <div class="card-shine"></div>
+                <div class="card-glare"></div>
+                {% if card.count > 1 %}
+                <span class="thumb-count">×{{ card.count }}</span>
+                {% endif %}
+            </div>
         </a>
         {% endfor %}
         {% if not cards %}
@@ -125,6 +174,37 @@
     <div id="scrollLoader" style="display:none; text-align:center; padding:1rem; color:var(--text-secondary); font-size:0.85rem;">Loading…</div>
 
 
+</div>
+
+<!-- Advanced search help modal -->
+<div id="advHelpModal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:520px;">
+        <span class="modal-close" id="advHelpClose">&times;</span>
+        <h2>Advanced Search Syntax</h2>
+        <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.5rem 0 1rem;">Combine any number of terms. Bare words search by name.</p>
+        <table class="adv-help-table">
+            <thead><tr><th>Keyword</th><th>Example</th><th>Matches</th></tr></thead>
+            <tbody>
+                <tr><td><code>name:</code></td><td><code>name:bolt</code></td><td>Card name contains "bolt"</td></tr>
+                <tr><td><code>type:</code> or <code>t:</code></td><td><code>type:creature</code></td><td>Type line contains word</td></tr>
+                <tr><td><code>o:</code> or <code>text:</code></td><td><code>o:flying</code></td><td>Rules text contains word</td></tr>
+                <tr><td><code>color:</code> or <code>c:</code></td><td><code>color:blue</code> <code>c:U</code></td><td>W U B R G, multicolor, colorless</td></tr>
+                <tr><td><code>rarity:</code> or <code>r:</code></td><td><code>rarity:rare</code> <code>r:m</code></td><td>common / uncommon / rare / mythic (or c/u/r/m)</td></tr>
+                <tr><td><code>set:</code> or <code>s:</code></td><td><code>set:MH3</code></td><td>Exact set code</td></tr>
+                <tr><td><code>cmc:</code> or <code>mv:</code></td><td><code>cmc>=4</code> <code>cmc:3</code></td><td>Mana value — supports = &gt; &lt; &gt;= &lt;=</td></tr>
+                <tr><td><code>power:</code></td><td><code>power>3</code></td><td>Power — supports = &gt; &lt; &gt;= &lt;=</td></tr>
+                <tr><td><code>toughness:</code></td><td><code>toughness<=2</code></td><td>Toughness — supports = &gt; &lt; &gt;= &lt;=</td></tr>
+            </tbody>
+        </table>
+        <p style="font-size:0.8rem;color:var(--text-secondary);margin-top:0.75rem;">
+            Quote multi-word values: <code>o:"first strike"</code><br>
+            Use <code>or</code> between terms to combine with OR: <code>type:ninja o:ninjato or o:sneak</code><br>
+            Terms without <code>or</code> between them are combined with AND.
+        </p>
+        <div style="margin-top:1.25rem;text-align:right;">
+            <button id="advHelpOk" class="btn btn-primary btn-sm">OK</button>
+        </div>
+    </div>
 </div>
 
 <!-- Import modal -->
@@ -191,9 +271,15 @@ function applySort() {
     const s1 = document.getElementById('sort1').value;
     const s2 = document.getElementById('sort2').value;
     const s3 = document.getElementById('sort3').value;
+    const d1 = document.getElementById('dir1').value;
+    const d2 = document.getElementById('dir2').value;
+    const d3 = document.getElementById('dir3').value;
     url.searchParams.set('sort1', s1);
-    if (s2) url.searchParams.set('sort2', s2); else url.searchParams.delete('sort2');
-    if (s3) url.searchParams.set('sort3', s3); else url.searchParams.delete('sort3');
+    url.searchParams.set('dir1', d1);
+    if (s2) { url.searchParams.set('sort2', s2); url.searchParams.set('dir2', d2); }
+    else { url.searchParams.delete('sort2'); url.searchParams.delete('dir2'); }
+    if (s3) { url.searchParams.set('sort3', s3); url.searchParams.set('dir3', d3); }
+    else { url.searchParams.delete('sort3'); url.searchParams.delete('dir3'); }
     url.searchParams.delete('sort');
     url.searchParams.delete('page');
     window.location = url;
@@ -211,6 +297,9 @@ function applySort() {
     function cardHTML(card) {
         const foilMark = card.foil ? ' ✦' : '';
         const title = (card.name + foilMark).replace(/"/g, '&quot;');
+        const isFoil   = card.foil ? '1' : '0';
+        const isMythic = card.rarity === 'mythic' ? '1' : '0';
+        const isHolo   = (card.rarity === 'rare' && !card.foil) ? '1' : '0';
         let inner;
         if (card.image_uri) {
             inner = `<img src="${card.image_uri}" alt="${title}" loading="lazy">`;
@@ -218,7 +307,10 @@ function applySort() {
             inner = `<div class="no-image-thumb">${card.name}</div>`;
         }
         const badge = card.count > 1 ? `<span class="thumb-count">×${card.count}</span>` : '';
-        return `<a href="/collection/${card.id}" class="card-thumb" title="${title}">${inner}${badge}</a>`;
+        return `<a href="/collection/${card.id}" class="card-thumb" title="${title}"
+            data-foil="${isFoil}" data-mythic="${isMythic}" data-holo="${isHolo}">
+            <div class="card-thumb-inner">${inner}<div class="card-shine"></div><div class="card-glare"></div>${badge}</div>
+        </a>`;
     }
 
     async function loadMore() {
@@ -254,50 +346,58 @@ function applySort() {
     }
 })();
 
-// Card zoom on hover
-(function () {
-    const zoom = document.createElement('div');
-    zoom.id = 'cardZoom';
-    zoom.style.display = 'none';
-    document.body.appendChild(zoom);
-    const grid = document.getElementById('cardsGrid');
-    if (!grid) return;
-    let hideTimer = null;
 
-    grid.addEventListener('mouseover', e => {
-        const thumb = e.target.closest('.card-thumb');
-        if (!thumb) return;
-        const img = thumb.querySelector('img');
-        if (!img) return;
-        clearTimeout(hideTimer);
-        zoom.innerHTML = `<img src="${img.src}" alt="${img.alt}">`;
-        zoom.style.display = 'block';
-        positionZoom(thumb);
-    });
+const advHelpBtn = document.getElementById('advHelpBtn');
+if (advHelpBtn) {
+    const advHelpModal = document.getElementById('advHelpModal');
+    advHelpBtn.addEventListener('click', () => { advHelpModal.style.display = 'block'; });
+    document.getElementById('advHelpClose').addEventListener('click', () => { advHelpModal.style.display = 'none'; });
+    document.getElementById('advHelpOk').addEventListener('click', () => { advHelpModal.style.display = 'none'; });
+    advHelpModal.addEventListener('click', e => { if (e.target === advHelpModal) advHelpModal.style.display = 'none'; });
+}
 
-    grid.addEventListener('mouseout', e => {
-        const thumb = e.target.closest('.card-thumb');
-        if (!thumb) return;
-        hideTimer = setTimeout(() => { zoom.style.display = 'none'; }, 80);
-    });
-
-    function positionZoom(thumb) {
-        const r = thumb.getBoundingClientRect();
-        const zw = 280, zh = zw * 1.4;
-        let left = r.right + 12;
-        let top = r.top;
-        if (left + zw > window.innerWidth - 8) left = r.left - zw - 12;
-        if (top + zh > window.innerHeight - 8) top = window.innerHeight - zh - 8;
-        if (top < 8) top = 8;
-        zoom.style.left = left + 'px';
-        zoom.style.top = top + 'px';
+document.getElementById('advToggle').addEventListener('click', () => {
+    const url = new URL(window.location);
+    const isAdv = url.searchParams.get('adv') === '1';
+    if (isAdv) {
+        url.searchParams.delete('adv');
+        url.searchParams.delete('q'); // clear adv query on exit
+    } else {
+        url.searchParams.set('adv', '1');
+        url.searchParams.delete('search_type');
+        url.searchParams.delete('search_rules');
     }
-})();
+    url.searchParams.delete('page');
+    window.location = url;
+});
 
 document.getElementById('filterToggle').addEventListener('click', () => {
     const p = document.getElementById('filterPanel');
     p.style.display = p.style.display === 'none' ? 'block' : 'none';
 });
+
+// MultiSelect for set filter — inject hidden inputs on submit
+const filterSetSelect = document.getElementById('filterSetSelect');
+if (filterSetSelect) {
+    const filterMs = new MultiSelect('#filterSetSelect', {
+        selectAll: false,
+        listAll: false,
+    });
+    document.getElementById('filterApplyBtn').addEventListener('click', (e) => {
+        e.preventDefault();
+        const form = document.getElementById('filterForm');
+        // Remove any existing set hidden inputs the form may have
+        form.querySelectorAll('input[name="set"]').forEach(el => el.remove());
+        filterMs.selectedValues.forEach(v => {
+            const inp = document.createElement('input');
+            inp.type = 'hidden';
+            inp.name = 'set';
+            inp.value = v;
+            form.appendChild(inp);
+        });
+        form.submit();
+    });
+}
 
 const importModal = document.getElementById('importModal');
 const assignModal = document.getElementById('assignModal');
