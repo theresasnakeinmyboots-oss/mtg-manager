@@ -1,0 +1,651 @@
+{% extends 'base.html' %}
+{% block title %}{{ deck.name }} - MTG Manager{% endblock %}
+
+{% block content %}
+<div class="deck-detail-page">
+
+    <!-- Header -->
+    <div class="deck-detail-header">
+        <div class="deck-detail-title">
+            <a href="/decks" class="deck-back">← Decks</a>
+            <h1>{{ deck.name }}</h1>
+            <span class="deck-format-badge">{{ format_label }}</span>
+        </div>
+        <div class="deck-detail-actions">
+            <span class="deck-stat">{{ total_count }} cards · {{ owned_count }}/{{ total_count }} owned</span>
+            {% if errors %}
+            <span class="deck-validity invalid" title="{{ errors | join(', ') }}">⚠ Invalid</span>
+            {% else %}
+            <span class="deck-validity valid">✓ Valid</span>
+            {% endif %}
+            <div class="deck-view-toggle">
+                <button class="deck-view-btn active" id="btnListView" title="List view">☰ List</button>
+                <button class="deck-view-btn" id="btnCardView" title="Card view">⊞ Cards</button>
+            </div>
+            <form method="POST" action="/decks/{{ deck.id }}/delete" style="display:inline;"
+                  onsubmit="return confirm('Delete this deck?');">
+                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+            </form>
+        </div>
+    </div>
+
+    {% if errors %}
+    <div class="deck-errors">
+        {% for e in errors %}
+        <div class="deck-error-item">
+            ⚠ {{ e }}
+            {% if 'Commander board' in e %}
+            <form method="POST" action="/decks/{{ deck.id }}/reboard-to-main" style="display:inline;margin-left:0.75rem;">
+                <button type="submit" class="btn btn-secondary btn-sm" style="font-size:0.75rem;padding:0.2rem 0.6rem;">Move all to mainboard</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if deck.description %}
+    <p class="deck-description">{{ deck.description }}</p>
+    {% endif %}
+
+    <!-- Add card -->
+    <div class="deck-add-bar">
+        <div class="deck-add-search-wrap">
+            <input type="text" id="cardSearchInput" class="deck-add-input" placeholder="Add a card…" autocomplete="off">
+            <div id="cardSearchResults" class="deck-add-results" style="display:none;"></div>
+        </div>
+        <select id="cardSearchBoard" class="deck-add-board">
+            <option value="main">Main</option>
+            <option value="side">Side</option>
+            <option value="commander">Cmdr</option>
+        </select>
+        <button id="cardSearchBtn" class="btn btn-primary btn-sm" disabled>Add</button>
+    </div>
+
+    <!-- Stats charts -->
+    <div class="deck-stats-panel">
+        <div class="deck-stat-card">
+            <div class="deck-stat-card-title">Mana Curve</div>
+            <div class="deck-stat-card-body">
+                <canvas id="chartCurve"></canvas>
+            </div>
+        </div>
+        <div class="deck-stat-card">
+            <div class="deck-stat-card-title">Colour &amp; Mana Sources</div>
+            <div class="deck-stat-card-body deck-stat-card-body--center">
+                <canvas id="chartColors"></canvas>
+            </div>
+        </div>
+        <div class="deck-stat-card">
+            <div class="deck-stat-card-title">Card Types</div>
+            <div class="deck-stat-card-body deck-stat-card-body--center">
+                <canvas id="chartTypes"></canvas>
+            </div>
+        </div>
+        {% if draw_probs %}
+        <div class="deck-stat-card">
+            <div class="deck-stat-card-title">Opening Hand (7 cards)</div>
+            <div class="deck-stat-card-body">
+                <div class="draw-prob-meta">{{ land_count }} lands / {{ deck_size }} cards</div>
+                <table class="draw-prob-table">
+                    {% for label, prob in draw_probs %}
+                    <tr>
+                        <td class="draw-prob-label">{{ label }}</td>
+                        <td class="draw-prob-bar-cell">
+                            <div class="draw-prob-bar-track">
+                                <div class="draw-prob-bar-fill" style="width:{{ (prob * 100) | round(1) }}%"></div>
+                            </div>
+                        </td>
+                        <td class="draw-prob-pct">{{ (prob * 100) | round(1) }}%</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+        </div>
+        {% endif %}
+        <div class="deck-stat-card">
+            <div class="deck-stat-card-title">Deck Health</div>
+            <div class="deck-stat-card-body">
+                <table class="draw-prob-table">
+                    {% for label, count, tag, tip in deck_health %}
+                    <tr title="{{ tip }}">
+                        <td class="draw-prob-label">{{ label }}</td>
+                        <td class="health-count health-{{ tag }}">{{ count }}</td>
+                        <td class="health-indicator">
+                            <span class="health-pip health-{{ tag }}">
+                                {% if tag == 'ok' %}✓{% elif tag == 'warn' %}~{% else %}✗{% endif %}
+                            </span>
+                        </td>
+                        <td class="draw-prob-label" style="color:var(--text-muted);font-size:0.72rem;">{{ tip }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active filter banner -->
+    <div id="filterBanner" style="display:none;" class="deck-filter-banner">
+        <span id="filterLabel"></span>
+        <button id="filterClear" class="deck-filter-clear">✕ Clear filter</button>
+    </div>
+
+    <!-- Commander -->
+    {% if cmd_rows %}
+    <section class="deck-section">
+        <h2 class="deck-section-heading">Commander</h2>
+        <div class="deck-card-list">
+            {% for card in cmd_rows %}
+            {% include 'decks/_card_row.html' %}
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Mainboard -->
+    <section class="deck-section">
+        <h2 class="deck-section-heading">Mainboard <span class="deck-section-count">{{ main_count }}</span></h2>
+        {% for type_name, cards in main_groups %}
+        <div class="deck-type-group">
+            <h3 class="deck-type-heading">{{ type_name }} <span class="deck-type-count">{{ cards | sum(attribute='count') }}</span></h3>
+            <div class="deck-card-list">
+                {% for card in cards %}
+                {% include 'decks/_card_row.html' %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+        {% if not main_groups %}
+        <p class="empty-state-inline">No cards in mainboard yet.</p>
+        {% endif %}
+    </section>
+
+    <!-- Sideboard -->
+    {% if side_groups %}
+    <section class="deck-section">
+        <h2 class="deck-section-heading">Sideboard <span class="deck-section-count">{{ side_count }}</span></h2>
+        {% for type_name, cards in side_groups %}
+        <div class="deck-type-group">
+            <h3 class="deck-type-heading">{{ type_name }} <span class="deck-type-count">{{ cards | sum(attribute='count') }}</span></h3>
+            <div class="deck-card-list">
+                {% for card in cards %}
+                {% include 'decks/_card_row.html' %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    <!-- Card grid view (hidden by default) -->
+    <div id="deckCardGrid" style="display:none;">
+        {% if cmd_rows %}
+        <div class="deck-type-group">
+            <h3 class="deck-type-heading">Commander <span class="deck-type-count">{{ cmd_rows | sum(attribute='count') }}</span></h3>
+            <div class="cards-grid-tight">
+                {% for card in cmd_rows %}
+                {% if card.image_uri_normal %}
+                <div class="card-thumb {% if card.owned_count == 0 %}unowned{% endif %}"
+                     data-scryfall-id="{{ card.scryfall_id }}"
+                     data-card-name="{{ card.name | e }}"
+                     data-colors="{{ card.colors or '[]' }}"
+                     data-type="{{ card.type_line or '' | e }}"
+                     title="{{ card.name }}">
+                    <div class="card-thumb-inner">
+                        <img src="{{ card.image_uri_normal }}" alt="{{ card.name }}" loading="lazy">
+                        <div class="card-shine"></div>
+                        <div class="card-glare"></div>
+                        {% if card.count > 1 %}<div class="thumb-count">×{{ card.count }}</div>{% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% for type_name, cards in main_groups %}
+        <div class="deck-type-group">
+            <h3 class="deck-type-heading">{{ type_name }} <span class="deck-type-count">{{ cards | sum(attribute='count') }}</span></h3>
+            <div class="cards-grid-tight">
+                {% for card in cards %}
+                {% if card.image_uri_normal %}
+                <div class="card-thumb {% if card.owned_count == 0 %}unowned{% endif %}"
+                     data-scryfall-id="{{ card.scryfall_id }}"
+                     data-card-name="{{ card.name | e }}"
+                     data-colors="{{ card.colors or '[]' }}"
+                     data-type="{{ card.type_line or '' | e }}"
+                     title="{{ card.name }}">
+                    <div class="card-thumb-inner">
+                        <img src="{{ card.image_uri_normal }}" alt="{{ card.name }}" loading="lazy">
+                        <div class="card-shine"></div>
+                        <div class="card-glare"></div>
+                        {% if card.count > 1 %}<div class="thumb-count">×{{ card.count }}</div>{% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+
+        {% if side_groups %}
+        {% for type_name, cards in side_groups %}
+        <div class="deck-type-group">
+            <h3 class="deck-type-heading">Sideboard: {{ type_name }} <span class="deck-type-count">{{ cards | sum(attribute='count') }}</span></h3>
+            <div class="cards-grid-tight">
+                {% for card in cards %}
+                {% if card.image_uri_normal %}
+                <div class="card-thumb {% if card.owned_count == 0 %}unowned{% endif %}"
+                     data-scryfall-id="{{ card.scryfall_id }}"
+                     data-card-name="{{ card.name | e }}"
+                     data-colors="{{ card.colors or '[]' }}"
+                     data-type="{{ card.type_line or '' | e }}"
+                     title="{{ card.name }}">
+                    <div class="card-thumb-inner">
+                        <img src="{{ card.image_uri_normal }}" alt="{{ card.name }}" loading="lazy">
+                        <div class="card-shine"></div>
+                        <div class="card-glare"></div>
+                        {% if card.count > 1 %}<div class="thumb-count">×{{ card.count }}</div>{% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- Card hover zoom (reuse from set view) -->
+<div id="cardZoom" style="display:none;position:fixed;z-index:9000;pointer-events:none;"></div>
+
+<script>
+// ── Chart defaults ────────────────────────────────────────────────
+Chart.defaults.color = '#cbd5e1';
+Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+Chart.defaults.font.size = 11;
+
+const curveData      = {{ chart_curve        | safe }};
+const colorData      = {{ chart_colors      | safe }};
+const typesData      = {{ chart_types       | safe }};
+const manaSrcData    = {{ chart_mana_src    | safe }};
+const manaSrcIds     = {{ chart_mana_src_ids | safe }};
+
+// ── Card filter engine ────────────────────────────────────────────
+let activeFilter = null;
+
+function applyFilter(filter) {
+    activeFilter = filter;
+    const rows = document.querySelectorAll('.deck-card-row');
+    const banner = document.getElementById('filterBanner');
+    const label  = document.getElementById('filterLabel');
+
+    if (!filter) {
+        rows.forEach(r => r.style.display = '');
+        document.querySelectorAll('.card-thumb[data-scryfall-id]').forEach(t => t.style.display = '');
+        document.querySelectorAll('.deck-type-group').forEach(g => g.style.display = '');
+        banner.style.display = 'none';
+        return;
+    }
+
+    function cardMatches(el) {
+        const sid    = el.dataset.scryfallId;
+        const colors = JSON.parse(el.dataset.colors || '[]');
+        const type   = el.dataset.type || '';
+
+        if (filter.kind === 'color-identity') {
+            const keyMap = {White:'W',Blue:'U',Black:'B',Red:'R',Green:'G',Colorless:'C'};
+            const key = keyMap[filter.colorName] || filter.colorName;
+            return colors.includes(key) || (key === 'C' && colors.length === 0);
+        } else if (filter.kind === 'mana-source') {
+            return (manaSrcIds[filter.colorName] || []).includes(sid);
+        } else if (filter.kind === 'type') {
+            return type.includes(filter.typeName) ||
+                   (filter.typeName === 'Other' && !['Creature','Instant','Sorcery','Enchantment','Artifact','Planeswalker','Land'].some(t => type.includes(t)));
+        }
+        return false;
+    }
+
+    rows.forEach(row => { row.style.display = cardMatches(row) ? '' : 'none'; });
+    document.querySelectorAll('.card-thumb[data-scryfall-id]').forEach(thumb => {
+        thumb.style.display = cardMatches(thumb) ? '' : 'none';
+    });
+
+    // Hide type-group sections that are entirely empty after filtering
+    document.querySelectorAll('.deck-type-group').forEach(g => {
+        const visibleRow   = Array.from(g.querySelectorAll('.deck-card-row')).some(r => r.style.display !== 'none');
+        const visibleThumb = Array.from(g.querySelectorAll('.card-thumb')).some(r => r.style.display !== 'none');
+        g.style.display = (visibleRow || visibleThumb) ? '' : 'none';
+    });
+
+    label.textContent = filter.label;
+    banner.style.display = 'flex';
+}
+
+document.getElementById('filterClear').addEventListener('click', () => applyFilter(null));
+
+// Mana curve — vertical bar chart
+new Chart(document.getElementById('chartCurve'), {
+    type: 'bar',
+    data: {
+        labels: curveData.labels,
+        datasets: [{
+            data: curveData.data,
+            backgroundColor: 'rgba(139, 92, 246, 0.75)',
+            borderColor:     'rgba(139, 92, 246, 1)',
+            borderWidth: 1,
+            borderRadius: 3,
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { grid: { color: 'rgba(71,85,105,0.4)' }, ticks: { color: '#cbd5e1' } },
+            y: { grid: { color: 'rgba(71,85,105,0.4)' }, ticks: { color: '#cbd5e1', stepSize: 1 }, beginAtZero: true },
+        },
+    }
+});
+
+// Colour distribution (inner) + Mana sources (outer) — combined donut
+const colorPalette = {
+    'White':     '#f8fafc',
+    'Blue':      '#38bdf8',
+    'Black':     '#a78bfa',
+    'Red':       '#f87171',
+    'Green':     '#4ade80',
+    'Colorless': '#94a3b8',
+    'Any Color': '#e2c97e',
+};
+// Inner ring uses only the 6 MTG colours; outer ring adds Any Color
+const innerColors = ['White','Blue','Black','Red','Green','Colorless'];
+const outerColors = ['White','Blue','Black','Red','Green','Colorless','Any Color'];
+
+const innerData = innerColors.map(l => {
+    const i = colorData.labels.indexOf(l);
+    return i >= 0 ? colorData.data[i] : 0;
+});
+const outerData = outerColors.map(l => {
+    const i = manaSrcData.labels.indexOf(l);
+    return i >= 0 ? manaSrcData.data[i] : 0;
+});
+const visibleInner = innerColors.filter((_, i) => innerData[i] > 0);
+const visibleOuter = outerColors.filter((_, i) => outerData[i] > 0);
+const visibleColors = [...new Set([...visibleInner, ...visibleOuter])];
+
+const colorsChart = new Chart(document.getElementById('chartColors'), {
+    type: 'doughnut',
+    data: {
+        labels: outerColors,
+        datasets: [
+            {
+                label: 'Colour identity',
+                data: innerData,
+                backgroundColor: innerColors.map(l => colorPalette[l] || '#94a3b8'),
+                borderColor: '#1e293b',
+                borderWidth: 2,
+                hoverOffset: 4,
+            },
+            {
+                label: 'Mana sources',
+                data: outerData,
+                backgroundColor: outerColors.map(l => (colorPalette[l] || '#94a3b8') + '99'),
+                borderColor: '#1e293b',
+                borderWidth: 2,
+                hoverOffset: 4,
+            },
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        onClick(e) {
+            const pts = colorsChart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, false);
+            if (!pts.length) { applyFilter(null); return; }
+            const { datasetIndex, index } = pts[0];
+            if (datasetIndex === 0) {
+                const colorName = innerColors[index];
+                applyFilter({ kind: 'color-identity', colorName,
+                    label: `Colour identity: ${colorName}` });
+            } else {
+                const colorName = outerColors[index];
+                applyFilter({ kind: 'mana-source', colorName,
+                    label: `Mana sources: ${colorName}` });
+            }
+        },
+        plugins: {
+            legend: { position: 'right', labels: { boxWidth: 12, padding: 8,
+                generateLabels(chart) {
+                    return visibleColors.map(name => ({
+                        text: name,
+                        fillStyle: (colorPalette[name] || '#94a3b8') +
+                            (visibleOuter.includes(name) && !visibleInner.includes(name) ? '99' : ''),
+                        strokeStyle: '#1e293b',
+                        lineWidth: 1,
+                        hidden: false,
+                    }));
+                },
+            }},
+            tooltip: {
+                callbacks: {
+                    title: (items) => items[0].label,
+                    label: (item) => {
+                        const ring = item.datasetIndex === 0 ? 'Identity' : 'Sources';
+                        return ` ${ring}: ${item.raw}`;
+                    },
+                }
+            },
+        },
+        cutout: '50%',
+    }
+});
+
+// Type breakdown — horizontal bar chart
+const typesChart = new Chart(document.getElementById('chartTypes'), {
+    type: 'bar',
+    data: {
+        labels: typesData.labels,
+        datasets: [{
+            data: typesData.data,
+            backgroundColor: [
+                'rgba(248,113,113,0.75)',  // Creature
+                'rgba(56,189,248,0.75)',   // Instant
+                'rgba(251,191,36,0.75)',   // Sorcery
+                'rgba(167,139,250,0.75)',  // Enchantment
+                'rgba(148,163,184,0.75)', // Artifact
+                'rgba(251,146,60,0.75)',  // Planeswalker
+                'rgba(74,222,128,0.75)',  // Land
+                'rgba(100,116,139,0.75)', // Other
+            ],
+            borderWidth: 0,
+            borderRadius: 3,
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: true,
+        onClick(e) {
+            const pts = typesChart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, false);
+            if (!pts.length) { applyFilter(null); return; }
+            const typeName = typesData.labels[pts[0].index];
+            applyFilter({ kind: 'type', typeName, label: `Card type: ${typeName}` });
+        },
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { grid: { color: 'rgba(71,85,105,0.4)' }, ticks: { color: '#cbd5e1', stepSize: 1 }, beginAtZero: true },
+            y: { grid: { display: false }, ticks: { color: '#cbd5e1' } },
+        },
+    }
+});
+
+// ── Inline count editor ───────────────────────────────────────────
+document.querySelectorAll('.deck-row-count').forEach(input => {
+    input.addEventListener('change', () => {
+        const row = input.closest('.deck-card-row');
+        const id  = row.dataset.id;
+        fetch(`/decks/{{ deck.id }}/set-count`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ id: parseInt(id), count: parseInt(input.value) })
+        }).then(r => r.json()).then(d => {
+            if (!d.ok) alert('Error updating count');
+            else location.reload();
+        });
+    });
+});
+
+document.querySelectorAll('.deck-row-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const row = btn.closest('.deck-card-row');
+        const id  = row.dataset.id;
+        fetch(`/decks/{{ deck.id }}/remove`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ id: parseInt(id) })
+        }).then(() => location.reload());
+    });
+});
+
+// ── List / card view toggle ───────────────────────────────────────
+(function () {
+    const listSections = document.querySelectorAll('.deck-section');
+    const cardGrid     = document.getElementById('deckCardGrid');
+    const btnList      = document.getElementById('btnListView');
+    const btnCard      = document.getElementById('btnCardView');
+
+    btnList.addEventListener('click', () => {
+        listSections.forEach(s => s.style.display = '');
+        cardGrid.style.display = 'none';
+        btnList.classList.add('active');
+        btnCard.classList.remove('active');
+    });
+
+    btnCard.addEventListener('click', () => {
+        listSections.forEach(s => s.style.display = 'none');
+        cardGrid.style.display = '';
+        btnCard.classList.add('active');
+        btnList.classList.remove('active');
+    });
+})();
+
+// ── Add card search ───────────────────────────────────────────────
+(function () {
+    const input   = document.getElementById('cardSearchInput');
+    const results = document.getElementById('cardSearchResults');
+    const board   = document.getElementById('cardSearchBoard');
+    const btn     = document.getElementById('cardSearchBtn');
+    let selected  = null;
+    let debounce  = null;
+
+    function clearResults() {
+        results.style.display = 'none';
+        results.innerHTML = '';
+    }
+
+    function selectCard(card) {
+        selected = card;
+        input.value = card.name;
+        btn.disabled = false;
+        clearResults();
+    }
+
+    input.addEventListener('input', () => {
+        selected = null;
+        btn.disabled = true;
+        clearTimeout(debounce);
+        const q = input.value.trim();
+        if (q.length < 2) { clearResults(); return; }
+        debounce = setTimeout(async () => {
+            const res  = await fetch(`/decks/{{ deck.id }}/search-cards?q=${encodeURIComponent(q)}`);
+            const data = await res.json();
+            if (!data.length) { clearResults(); return; }
+            results.innerHTML = data.map(c => `
+                <div class="deck-add-result-item" tabindex="0" data-sid="${c.scryfall_id}" data-name="${c.name.replace(/"/g,'&quot;')}">
+                    <span class="deck-add-result-name">${c.name}</span>
+                    <span class="deck-add-result-meta">${c.set_name} · ${c.type_line || ''}</span>
+                </div>`).join('');
+            results.style.display = 'block';
+        }, 220);
+    });
+
+    results.addEventListener('click', e => {
+        const item = e.target.closest('.deck-add-result-item');
+        if (!item) return;
+        selectCard({ scryfall_id: item.dataset.sid, name: item.dataset.name });
+    });
+
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { clearResults(); return; }
+        if (e.key === 'ArrowDown') {
+            const items = results.querySelectorAll('.deck-add-result-item');
+            if (items.length) items[0].focus();
+        }
+    });
+
+    results.addEventListener('keydown', e => {
+        const items = [...results.querySelectorAll('.deck-add-result-item')];
+        const idx   = items.indexOf(document.activeElement);
+        if (e.key === 'ArrowDown' && idx < items.length - 1) items[idx + 1].focus();
+        if (e.key === 'ArrowUp')  { idx > 0 ? items[idx-1].focus() : input.focus(); }
+        if (e.key === 'Enter' && idx >= 0) selectCard({ scryfall_id: items[idx].dataset.sid, name: items[idx].dataset.name });
+        if (e.key === 'Escape') { clearResults(); input.focus(); }
+    });
+
+    document.addEventListener('click', e => {
+        if (!e.target.closest('.deck-add-search-wrap')) clearResults();
+    });
+
+    btn.addEventListener('click', async () => {
+        if (!selected) return;
+        btn.disabled = true;
+        btn.textContent = '…';
+        const res  = await fetch(`/decks/{{ deck.id }}/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scryfall_id: selected.scryfall_id, board: board.value, count: 1 }),
+        });
+        const data = await res.json();
+        btn.textContent = 'Add';
+        if (data.ok) {
+            input.value = '';
+            selected = null;
+            location.reload();
+        } else {
+            btn.disabled = false;
+            alert(data.error || 'Failed to add card');
+        }
+    });
+})();
+
+// ── Hover zoom ────────────────────────────────────────────────────
+(function () {
+    const zoom = document.getElementById('cardZoom');
+    let hideTimer = null;
+
+    document.addEventListener('mouseover', e => {
+        const row = e.target.closest('.deck-card-row[data-img]');
+        if (!row || !row.dataset.img) return;
+        clearTimeout(hideTimer);
+        zoom.innerHTML = `<img src="${row.dataset.img}" style="width:200px;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.7);">`;
+        zoom.style.display = 'block';
+        const r = row.getBoundingClientRect();
+        let left = r.right + 12, top = r.top;
+        if (left + 210 > window.innerWidth - 8) left = r.left - 222;
+        if (top + 280 > window.innerHeight - 8) top = window.innerHeight - 288;
+        if (top < 8) top = 8;
+        zoom.style.left = left + 'px';
+        zoom.style.top  = top  + 'px';
+    });
+
+    document.addEventListener('mouseout', e => {
+        if (!e.target.closest('.deck-card-row')) return;
+        hideTimer = setTimeout(() => { zoom.style.display = 'none'; }, 80);
+    });
+})();
+</script>
+{% endblock %}

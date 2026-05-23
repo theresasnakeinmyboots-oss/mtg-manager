@@ -227,13 +227,15 @@ class ScryfallClient:
         self.db.commit()
 
     def _format_card(self, card_data: Dict[str, Any]) -> Dict[str, Any]:
+        faces = card_data.get('card_faces', [])
+        mana_cost = card_data.get('mana_cost', '') or (faces[0].get('mana_cost', '') if faces else '')
         return {
             'scryfall_id': card_data.get('id'),
             'name': card_data.get('name', ''),
             'set_code': card_data.get('set', '').upper(),
             'set_name': card_data.get('set_name', ''),
             'collector_number': card_data.get('collector_number', ''),
-            'mana_cost': card_data.get('mana_cost', ''),
+            'mana_cost': mana_cost,
             'cmc': float(card_data.get('cmc', 0)),
             'colors': json.dumps(card_data.get('colors', [])),
             'color_identity': json.dumps(card_data.get('color_identity', [])),

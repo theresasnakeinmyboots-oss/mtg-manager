@@ -71,8 +71,12 @@ def format_mana_cost(mana_cost: str) -> str:
     """Convert a pure Scryfall mana cost string (e.g. {1}{W}{U}) to mana symbol HTML."""
     if not mana_cost:
         return ''
-    symbols = re.findall(r'\{[^}]+\}', mana_cost)
-    return ''.join(f'<i class="{_symbol_to_ms_class(s)}"></i>' for s in symbols)
+    parts = mana_cost.split(' // ')
+    rendered = []
+    for part in parts:
+        symbols = re.findall(r'\{[^}]+\}', part)
+        rendered.append(''.join(f'<i class="{_symbol_to_ms_class(s)}"></i>' for s in symbols))
+    return '<span class="mana-split-sep"> // </span>'.join(rendered)
 
 
 def format_oracle_text(text: str) -> str:

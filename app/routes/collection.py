@@ -569,6 +569,83 @@ def switch_printing(row_id):
     return jsonify({'success': True, 'new_row_id': new_row_id})
 
 
+@collection_bp.route('/collection/quick-add', methods=['POST'])
+def quick_add():
+    """Add one copy of a card (by scryfall_id) to a collection, creating the cards row if needed."""
+    data        = request.get_json(force=True)
+    scryfall_id = data.get('scryfall_id', '').strip()
+    collection_id = data.get('collection_id') or None
+
+    if not scryfall_id:
+        return jsonify(error='scryfall_id required'), 400
+
+    db = get_db()
+
+    bulk = db.execute('SELECT * FROM scryfall_bulk WHERE scryfall_id = ? LIMIT 1', [scryfall_id]).fetchone()
+    if not bulk:
+        db.close()
+        return jsonify(error='Card not found in bulk data'), 404
+
+    # Validate collection exists if one was specified
+    if collection_id:
+        coll = db.execute('SELECT id FROM collections WHERE id = ?', [collection_id]).fetchone()
+        if not coll:
+            db.close()
+            return jsonify(error='Collection not found'), 404
+
+    # Get or create the cards row
+    card_row = db.execute('SELECT id FROM cards WHERE scryfall_id = ?', [scryfall_id]).fetchone()
+    if card_row:
+        card_id = card_row['id']
+    else:
+        cur = db.execute('''
+            INSERT INTO cards (scryfall_id, name, set_code, set_name, collector_number,
+                mana_cost, cmc, colors, color_identity, type_line, oracle_text, flavor_text,
+                power, toughness, rarity, legalities, image_uri_normal, image_uri_small,
+                artist, enriched_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+        ''', (bulk['scryfall_id'], bulk['name'], bulk['set_code'], bulk['set_name'],
+              bulk['collector_number'], bulk['mana_cost'], bulk['cmc'], bulk['colors'],
+              bulk['color_identity'], bulk['type_line'], bulk['oracle_text'], bulk['flavor_text'],
+              bulk['power'], bulk['toughness'], bulk['rarity'], bulk['legalities'],
+              bulk['image_uri_normal'], bulk['image_uri_small'], bulk['artist']))
+        card_id = cur.lastrowid
+
+    # Increment existing row or insert a new one
+    existing = db.execute(
+        '''SELECT id FROM collection
+           WHERE card_id = ? AND foil = '' AND condition = 'NM'
+           AND collection_id IS ?''',
+        [card_id, collection_id]
+    ).fetchone()
+
+    if existing:
+        db.execute('UPDATE collection SET count = count + 1 WHERE id = ?', [existing['id']])
+    else:
+        from datetime import datetime, timezone
+        db.execute('''
+            INSERT INTO collection
+                (card_id, scryfall_id, name, edition, card_number, count, tradelist_count,
+                 condition, language, foil, signed, artist_proof, altered_art, misprint,
+                 promo, textless, my_price, collection_id, imported_at)
+            VALUES (?,?,?,?,?,1,0,'NM','English','',0,0,0,0,0,0,NULL,?,?)
+        ''', (card_id, scryfall_id, bulk['name'], bulk['set_name'], bulk['collector_number'],
+              collection_id, datetime.now(timezone.utc).isoformat()))
+
+    db.commit()
+    db.close()
+    return jsonify(ok=True, name=bulk['name'])
+
+
+@collection_bp.route('/collection/api/collections')
+def api_collections():
+    """Return all non-staging collections for the context menu."""
+    db = get_db()
+    rows = db.execute('SELECT id, name FROM collections WHERE is_staging = 0 ORDER BY name').fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
+
+
 @collection_bp.route('/enrich-card/<int:card_id>', methods=['POST'])
 def enrich_card(card_id):
     db = get_db()

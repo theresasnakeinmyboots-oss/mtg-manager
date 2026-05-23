@@ -33,6 +33,27 @@
         </form>
         <div id="datadbStatus" style="margin-top:0.75rem;"></div>
     </div>
+
+    <div class="admin-section">
+        <h2 class="admin-section-title">Scryfall Bulk Data</h2>
+        <p class="admin-section-desc">
+            Downloads the full Scryfall card database (~250 MB) and updates the local
+            <code>scryfall_bulk</code> table. Run this after first setup and periodically
+            to pick up new card data and price updates. The sync runs in the background —
+            this page will poll for completion.
+        </p>
+
+        <button class="btn btn-primary btn-sm" id="bulkSyncBtn" {% if bulk_sync_running %}disabled{% endif %}>
+            {% if bulk_sync_running %}Sync in progress…{% else %}Download &amp; sync now{% endif %}
+        </button>
+
+        {% if bulk_sync_log %}
+        <pre id="bulkSyncLog" style="margin-top:1rem; max-height:260px; overflow-y:auto; font-size:0.78rem; background:var(--bg-card); border:1px solid var(--border); padding:0.75rem; border-radius:6px; white-space:pre-wrap;">{{ bulk_sync_log }}</pre>
+        {% else %}
+        <pre id="bulkSyncLog" style="margin-top:1rem; max-height:260px; overflow-y:auto; font-size:0.78rem; background:var(--bg-card); border:1px solid var(--border); padding:0.75rem; border-radius:6px; white-space:pre-wrap; display:none;"></pre>
+        {% endif %}
+        <div id="bulkSyncStatus" style="margin-top:0.5rem;"></div>
+    </div>
 </div>
 
 <script>
@@ -67,5 +88,60 @@ document.getElementById('datadbForm').addEventListener('submit', async e => {
         btn.textContent = 'Upload data.db';
     }
 });
+
+// Bulk sync
+const bulkBtn = document.getElementById('bulkSyncBtn');
+const bulkLog = document.getElementById('bulkSyncLog');
+const bulkStatus = document.getElementById('bulkSyncStatus');
+let bulkPollInterval = null;
+
+function scrollLog() {
+    bulkLog.scrollTop = bulkLog.scrollHeight;
+}
+
+async function pollBulkLog() {
+    try {
+        const res = await fetch('/admin/bulk-sync-log');
+        const data = await res.json();
+        bulkLog.style.display = '';
+        bulkLog.textContent = data.log;
+        scrollLog();
+        if (!data.running) {
+            clearInterval(bulkPollInterval);
+            bulkPollInterval = null;
+            bulkBtn.disabled = false;
+            bulkBtn.textContent = 'Download & sync now';
+            bulkStatus.innerHTML = '<span style="color:var(--success)">✓ Sync complete.</span>';
+        }
+    } catch (e) { /* ignore */ }
+}
+
+bulkBtn.addEventListener('click', async () => {
+    bulkBtn.disabled = true;
+    bulkBtn.textContent = 'Sync in progress…';
+    bulkStatus.innerHTML = '';
+    bulkLog.style.display = '';
+    bulkLog.textContent = 'Starting…';
+
+    try {
+        const res = await fetch('/admin/bulk-sync', { method: 'POST' });
+        const data = await res.json();
+        if (data.started) {
+            bulkPollInterval = setInterval(pollBulkLog, 3000);
+        } else {
+            bulkStatus.innerHTML = `<span style="color:var(--danger)">✗ ${data.error}</span>`;
+            bulkBtn.disabled = false;
+            bulkBtn.textContent = 'Download & sync now';
+        }
+    } catch (err) {
+        bulkStatus.innerHTML = `<span style="color:var(--danger)">✗ ${err.message}</span>`;
+        bulkBtn.disabled = false;
+        bulkBtn.textContent = 'Download & sync now';
+    }
+});
+
+{% if bulk_sync_running %}
+bulkPollInterval = setInterval(pollBulkLog, 3000);
+{% endif %}
 </script>
 {% endblock %}

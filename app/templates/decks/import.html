@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Import Deck - MTG Manager{% endblock %}
+
+{% block content %}
+<div class="deck-form-page">
+    <h1>Import Deck List</h1>
+    <p class="deck-import-hint">
+        Paste a deck list in standard text format. Supported:
+        <code>1 Lightning Bolt</code>, <code>1x Lightning Bolt (M11)</code>,
+        MTGA export format (<code>1 Card Name (SET) 123</code>).
+        Section headers <code>Deck</code>, <code>Sideboard</code>, <code>Commander</code> are recognised.
+    </p>
+    {% if error %}<p class="form-error">{{ error }}</p>{% endif %}
+    <form method="POST" class="deck-form">
+        <label>
+            Deck name
+            <input type="text" name="name" value="{{ form.get('name','') }}" required autofocus>
+        </label>
+        <label>
+            Format
+            <select name="format" required>
+                <option value="">Select format…</option>
+                {% for key, label in formats.items() %}
+                <option value="{{ key }}" {% if form.get('format') == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Description <span style="font-weight:400;color:var(--text-secondary);">(optional)</span>
+            <textarea name="description" rows="2">{{ form.get('description','') }}</textarea>
+        </label>
+        <label>
+            Deck list
+            <textarea name="decklist" rows="18" placeholder="4 Ragavan, Nimble Pilferer&#10;4 Dragon's Rage Channeler&#10;...&#10;&#10;Sideboard&#10;2 Surgical Extraction">{{ form.get('decklist','') }}</textarea>
+        </label>
+        <div class="deck-form-actions">
+            <a href="/decks/import-dlens" class="btn btn-secondary btn-sm">Delver Lens instead</a>
+            <a href="/decks" class="btn btn-secondary btn-sm">Cancel</a>
+            <button type="submit" class="btn btn-primary btn-sm">Import</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

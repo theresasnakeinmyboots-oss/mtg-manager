@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}New Deck - MTG Manager{% endblock %}
+
+{% block content %}
+<div class="deck-form-page">
+    <h1>New Deck</h1>
+    {% if error %}<p class="form-error">{{ error }}</p>{% endif %}
+    <form method="POST" class="deck-form">
+        <label>
+            Name
+            <input type="text" name="name" value="{{ form.get('name','') }}" required autofocus>
+        </label>
+        <label>
+            Format
+            <select name="format" required>
+                <option value="">Select format…</option>
+                {% for key, label in formats.items() %}
+                <option value="{{ key }}" {% if form.get('format') == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Description <span style="font-weight:400;color:var(--text-secondary);">(optional)</span>
+            <textarea name="description" rows="3">{{ form.get('description','') }}</textarea>
+        </label>
+        <div class="deck-form-actions">
+            <a href="/decks" class="btn btn-secondary btn-sm">Cancel</a>
+            <button type="submit" class="btn btn-primary btn-sm">Create deck</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

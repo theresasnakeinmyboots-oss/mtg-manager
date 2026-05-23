@@ -11,10 +11,12 @@ def index():
     collection_id = request.args.get('coll', type=int)
 
     # Filters
-    filter_color = request.args.get('color', '').strip()
-    filter_type  = request.args.get('type', '').strip()
+    filter_color  = request.args.get('color', '').strip()
+    filter_type   = request.args.get('type', '').strip()
     filter_rarity = request.args.get('rarity', '').strip()
-    filter_foil  = request.args.get('foil', '').strip()
+    filter_foil   = request.args.get('foil', '').strip()
+    filter_name   = request.args.get('name', '').strip()
+    filter_owned  = request.args.get('owned', '').strip()  # 'unowned' | 'owned' | ''
 
     # All sets from bulk data, ordered by name
     all_sets = [
@@ -56,7 +58,11 @@ def index():
 
         if filter_rarity:
             card_filters += ' AND b.rarity = ?'
-            card_filter_params.append(filter_rarity)
+            card_filter_params.append(filter_rarity.upper())
+
+        if filter_name:
+            card_filters += ' AND b.name LIKE ?'
+            card_filter_params.append(f'%{filter_name}%')
 
         for code in set_codes:
             base_params = ([collection_id, code] if collection_id else [code])
@@ -82,9 +88,13 @@ def index():
                 ORDER BY CAST(b.collector_number AS INTEGER), b.collector_number
             ''', params).fetchall()
 
-            # foil filter is post-query (foil is on collection, not bulk)
+            # post-query filters (fields not in bulk data)
             if filter_foil:
                 rows = [r for r in rows if r['foil'] == 'foil' or r['owned_count'] == 0]
+            if filter_owned == 'unowned':
+                rows = [r for r in rows if r['owned_count'] == 0]
+            elif filter_owned == 'owned':
+                rows = [r for r in rows if r['owned_count'] > 0]
 
             groups.append({
                 'set_code': code,
@@ -102,4 +112,6 @@ def index():
                            filter_color=filter_color,
                            filter_type=filter_type,
                            filter_rarity=filter_rarity,
-                           filter_foil=filter_foil)
+                           filter_foil=filter_foil,
+                           filter_name=filter_name,
+                           filter_owned=filter_owned)

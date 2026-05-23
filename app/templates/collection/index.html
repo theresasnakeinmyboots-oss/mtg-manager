@@ -144,7 +144,9 @@
            title="{{ card.name }}{% if card.foil %} ✦{% endif %}"
            data-foil="{{ '1' if card.foil else '0' }}"
            data-mythic="{{ '1' if card.rarity == 'mythic' else '0' }}"
-           data-holo="{{ '1' if card.rarity in ('rare',) and not card.foil else '0' }}">
+           data-holo="{{ '1' if card.rarity in ('rare',) and not card.foil else '0' }}"
+           data-scryfall-id="{{ card.scryfall_id or '' }}"
+           data-card-name="{{ card.name | e }}">
             <div class="card-thumb-inner">
                 {% if card.image_uri %}
                 <img src="{{ card.image_uri }}" alt="{{ card.name }}" loading="lazy">
@@ -308,7 +310,8 @@ function applySort() {
         }
         const badge = card.count > 1 ? `<span class="thumb-count">×${card.count}</span>` : '';
         return `<a href="/collection/${card.id}" class="card-thumb" title="${title}"
-            data-foil="${isFoil}" data-mythic="${isMythic}" data-holo="${isHolo}">
+            data-foil="${isFoil}" data-mythic="${isMythic}" data-holo="${isHolo}"
+            data-scryfall-id="${card.scryfall_id || ''}" data-card-name="${card.name.replace(/"/g,'&quot;')}">
             <div class="card-thumb-inner">${inner}<div class="card-shine"></div><div class="card-glare"></div>${badge}</div>
         </a>`;
     }
