@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='card-effects.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='MultiSelect.css') }}">
     <script src="{{ url_for('static', filename='MultiSelect.js') }}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <nav class="navbar">
@@ -19,7 +20,7 @@
                 <li><a href="/collection" class="nav-link">Browse</a></li>
                 <li><a href="/collections" class="nav-link">Collections</a></li>
                 <li><a href="/sets" class="nav-link">Set View</a></li>
-                <li><a href="#" class="nav-link disabled">Deck Builder</a></li>
+                <li><a href="/decks" class="nav-link">Decks</a></li>
                 <li><a href="#" class="nav-link disabled">Simulation</a></li>
                 <li><a href="/admin" class="nav-link">Admin</a></li>
             </ul>
@@ -34,5 +35,6 @@
         <p>&copy; 2026 MTG Collection Manager</p>
     </footer>
     <script src="{{ url_for('static', filename='card-effects.js') }}"></script>
+    <script src="{{ url_for('static', filename='deck-menu.js') }}"></script>
 </body>
 </html>

@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}Decks - MTG Manager{% endblock %}
+
+{% block content %}
+<div class="deck-list-page">
+    <div class="deck-list-header">
+        <h1>Decks</h1>
+        <div class="deck-list-actions">
+            <a href="/decks/import" class="btn btn-secondary btn-sm">Import text list</a>
+            <a href="/decks/import-dlens" class="btn btn-secondary btn-sm">Import Delver Lens</a>
+            <a href="/decks/new" class="btn btn-primary btn-sm">+ New deck</a>
+        </div>
+    </div>
+
+    {% if decks %}
+    <div class="deck-grid">
+        {% for deck in decks %}
+        <a href="/decks/{{ deck.id }}" class="deck-card">
+            <div class="deck-card-format">{{ format_labels.get(deck.format, deck.format) }}</div>
+            <div class="deck-card-name">{{ deck.name }}</div>
+            <div class="deck-card-meta">
+                <span>{{ deck.total_cards }} cards</span>
+                {% set colors = deck_colors.get(deck.id, []) %}
+                {% if colors %}
+                <span class="deck-card-colors">
+                    {% for c in colors %}<i class="ms ms-{{ c | lower }} ms-cost ms-shadow"></i>{% endfor %}
+                </span>
+                {% endif %}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No decks yet. <a href="/decks/new">Create one</a> or <a href="/decks/import">import a deck list</a>.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

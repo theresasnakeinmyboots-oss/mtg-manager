@@ -40,42 +40,60 @@
     </div>
 
     {% if set_codes %}
-    <form method="GET" class="set-filter-bar">
-        {% for code in set_codes %}<input type="hidden" name="set" value="{{ code }}">{% endfor %}
-        {% if collection_id %}<input type="hidden" name="coll" value="{{ collection_id }}">{% endif %}
-        <select name="color">
-            <option value="">Any colour</option>
-            <option value="W" {% if filter_color == 'W' %}selected{% endif %}>White</option>
-            <option value="U" {% if filter_color == 'U' %}selected{% endif %}>Blue</option>
-            <option value="B" {% if filter_color == 'B' %}selected{% endif %}>Black</option>
-            <option value="R" {% if filter_color == 'R' %}selected{% endif %}>Red</option>
-            <option value="G" {% if filter_color == 'G' %}selected{% endif %}>Green</option>
-            <option value="multicolor" {% if filter_color == 'multicolor' %}selected{% endif %}>Multicolour</option>
-            <option value="colorless" {% if filter_color == 'colorless' %}selected{% endif %}>Colourless</option>
-        </select>
-        <select name="type">
-            <option value="">Any type</option>
-            <option value="Creature" {% if filter_type == 'Creature' %}selected{% endif %}>Creature</option>
-            <option value="Instant" {% if filter_type == 'Instant' %}selected{% endif %}>Instant</option>
-            <option value="Sorcery" {% if filter_type == 'Sorcery' %}selected{% endif %}>Sorcery</option>
-            <option value="Enchantment" {% if filter_type == 'Enchantment' %}selected{% endif %}>Enchantment</option>
-            <option value="Artifact" {% if filter_type == 'Artifact' %}selected{% endif %}>Artifact</option>
-            <option value="Land" {% if filter_type == 'Land' %}selected{% endif %}>Land</option>
-            <option value="Planeswalker" {% if filter_type == 'Planeswalker' %}selected{% endif %}>Planeswalker</option>
-        </select>
-        <select name="rarity">
-            <option value="">Any rarity</option>
-            <option value="common" {% if filter_rarity == 'common' %}selected{% endif %}>Common</option>
-            <option value="uncommon" {% if filter_rarity == 'uncommon' %}selected{% endif %}>Uncommon</option>
-            <option value="rare" {% if filter_rarity == 'rare' %}selected{% endif %}>Rare</option>
-            <option value="mythic" {% if filter_rarity == 'mythic' %}selected{% endif %}>Mythic</option>
-        </select>
-        <label class="foil-check"><input type="checkbox" name="foil" value="foil" {% if filter_foil %}checked{% endif %}> Foil only</label>
-        <button type="submit" class="btn btn-primary btn-sm">Apply</button>
-        {% if filter_color or filter_type or filter_rarity or filter_foil %}
-        <a href="/sets?{% for code in set_codes %}set={{ code }}&{% endfor %}{% if collection_id %}coll={{ collection_id }}{% endif %}" class="btn btn-secondary btn-sm">Clear</a>
-        {% endif %}
-    </form>
+    <div class="filter-panel" style="margin-bottom:1rem;">
+        <form method="GET" class="filter-form-inline">
+            {% for code in set_codes %}<input type="hidden" name="set" value="{{ code }}">{% endfor %}
+            {% if collection_id %}<input type="hidden" name="coll" value="{{ collection_id }}">{% endif %}
+
+            <input type="text" name="name" placeholder="Card name…" value="{{ filter_name }}"
+                   style="min-width:160px;flex:1;">
+
+            <select name="color">
+                <option value="">Any colour</option>
+                <option value="W" {% if filter_color == 'W' %}selected{% endif %}>White</option>
+                <option value="U" {% if filter_color == 'U' %}selected{% endif %}>Blue</option>
+                <option value="B" {% if filter_color == 'B' %}selected{% endif %}>Black</option>
+                <option value="R" {% if filter_color == 'R' %}selected{% endif %}>Red</option>
+                <option value="G" {% if filter_color == 'G' %}selected{% endif %}>Green</option>
+                <option value="multicolor" {% if filter_color == 'multicolor' %}selected{% endif %}>Multicolour</option>
+                <option value="colorless" {% if filter_color == 'colorless' %}selected{% endif %}>Colourless</option>
+            </select>
+
+            <select name="type">
+                <option value="">Any type</option>
+                <option value="Creature" {% if filter_type == 'Creature' %}selected{% endif %}>Creature</option>
+                <option value="Instant" {% if filter_type == 'Instant' %}selected{% endif %}>Instant</option>
+                <option value="Sorcery" {% if filter_type == 'Sorcery' %}selected{% endif %}>Sorcery</option>
+                <option value="Enchantment" {% if filter_type == 'Enchantment' %}selected{% endif %}>Enchantment</option>
+                <option value="Artifact" {% if filter_type == 'Artifact' %}selected{% endif %}>Artifact</option>
+                <option value="Land" {% if filter_type == 'Land' %}selected{% endif %}>Land</option>
+                <option value="Planeswalker" {% if filter_type == 'Planeswalker' %}selected{% endif %}>Planeswalker</option>
+            </select>
+
+            <select name="rarity">
+                <option value="">Any rarity</option>
+                <option value="common" {% if filter_rarity == 'common' %}selected{% endif %}>Common</option>
+                <option value="uncommon" {% if filter_rarity == 'uncommon' %}selected{% endif %}>Uncommon</option>
+                <option value="rare" {% if filter_rarity == 'rare' %}selected{% endif %}>Rare</option>
+                <option value="mythic" {% if filter_rarity == 'mythic' %}selected{% endif %}>Mythic</option>
+            </select>
+
+            <select name="owned">
+                <option value="" {% if not filter_owned %}selected{% endif %}>All cards</option>
+                <option value="owned" {% if filter_owned == 'owned' %}selected{% endif %}>Owned only</option>
+                <option value="unowned" {% if filter_owned == 'unowned' %}selected{% endif %}>Unowned only</option>
+            </select>
+
+            <label class="foil-check">
+                <input type="checkbox" name="foil" value="foil" {% if filter_foil %}checked{% endif %}> Foil only
+            </label>
+
+            <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+            {% if filter_name or filter_color or filter_type or filter_rarity or filter_foil or filter_owned %}
+            <a href="/sets?{% for code in set_codes %}set={{ code }}&{% endfor %}{% if collection_id %}coll={{ collection_id }}{% endif %}" class="btn btn-secondary btn-sm">Clear</a>
+            {% endif %}
+        </form>
+    </div>
     {% endif %}
 
     {% if groups %}
@@ -85,7 +103,10 @@
             {% if group.cards %}
             <div class="set-grid">
                 {% for card in group.cards %}
-                <div class="set-card-thumb {% if card.owned_count == 0 %}unowned{% endif %}" data-name="{{ card.name | e }}" data-set-name="{{ group.set_name | e }}" style="cursor:pointer;">
+                <div class="set-card-thumb {% if card.owned_count == 0 %}unowned{% endif %}"
+                     data-name="{{ card.name | e }}" data-set-name="{{ group.set_name | e }}"
+                     data-scryfall-id="{{ card.scryfall_id }}" data-card-name="{{ card.name | e }}"
+                     style="cursor:pointer;">
                     {% if card.collection_row_id %}
                     <a href="/collection/{{ card.collection_row_id }}">
                     {% endif %}

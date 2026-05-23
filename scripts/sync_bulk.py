@@ -34,6 +34,9 @@ def format_card(c):
     flavor = c.get('flavor_text', '')
     if not flavor and c.get('card_faces'):
         flavor = c['card_faces'][0].get('flavor_text', '')
+    mana_cost = c.get('mana_cost', '')
+    if not mana_cost and c.get('card_faces'):
+        mana_cost = c['card_faces'][0].get('mana_cost', '')
     prices = c.get('prices') or {}
     return (
         c['id'],
@@ -41,7 +44,7 @@ def format_card(c):
         c.get('set', '').upper(),
         c.get('set_name', ''),
         c.get('collector_number', ''),
-        c.get('mana_cost', ''),
+        mana_cost,
         float(c.get('cmc', 0) or 0),
         json.dumps(c.get('colors', [])),
         json.dumps(c.get('color_identity', [])),

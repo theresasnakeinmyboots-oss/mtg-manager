@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}Import Delver Lens Deck - MTG Manager{% endblock %}
+
+{% block content %}
+<div class="deck-form-page">
+    <h1>Import Delver Lens Deck</h1>
+    <p class="deck-import-hint">
+        Upload a <code>.dlens</code> file exported from Delver Lens. All cards will be added to the
+        selected board. Requires the Delver Lens <code>data.db</code> to be uploaded via the
+        <a href="/admin">Admin page</a> first.
+    </p>
+    {% if not has_datadb %}
+    <p class="form-error">⚠ data.db not found. Please upload it via the <a href="/admin">Admin page</a> before importing.</p>
+    {% endif %}
+    {% if error %}<p class="form-error">{{ error }}</p>{% endif %}
+    <form method="POST" enctype="multipart/form-data" class="deck-form">
+        <label>
+            Deck name
+            <input type="text" name="name" value="{{ form.get('name','') }}" required autofocus>
+        </label>
+        <label>
+            Format
+            <select name="format" required>
+                <option value="">Select format…</option>
+                {% for key, label in formats.items() %}
+                <option value="{{ key }}" {% if form.get('format') == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Description <span style="font-weight:400;color:var(--text-secondary);">(optional)</span>
+            <textarea name="description" rows="2">{{ form.get('description','') }}</textarea>
+        </label>
+        <label>
+            Default board
+            <select name="board">
+                <option value="main" {% if form.get('board','main') == 'main' %}selected{% endif %}>Mainboard</option>
+                <option value="side" {% if form.get('board') == 'side' %}selected{% endif %}>Sideboard</option>
+                <option value="commander" {% if form.get('board') == 'commander' %}selected{% endif %}>Commander</option>
+            </select>
+        </label>
+        <label>
+            Delver Lens file (.dlens)
+            <input type="file" name="file" accept=".dlens" required>
+        </label>
+        <div class="deck-form-actions">
+            <a href="/decks/import" class="btn btn-secondary btn-sm">Text import instead</a>
+            <a href="/decks" class="btn btn-secondary btn-sm">Cancel</a>
+            <button type="submit" class="btn btn-primary btn-sm" {% if not has_datadb %}disabled{% endif %}>Import</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

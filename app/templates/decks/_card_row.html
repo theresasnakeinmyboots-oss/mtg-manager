@@ -1,0 +1,21 @@
+<div class="deck-card-row {% if card.owned_count == 0 %}unowned{% endif %}"
+     data-id="{{ card.id }}"
+     data-scryfall-id="{{ card.scryfall_id }}"
+     data-card-name="{{ card.name | e }}"
+     data-colors="{{ card.colors or '[]' }}"
+     data-type="{{ card.type_line or '' | e }}"
+     {% if card.image_uri_normal %}data-img="{{ card.image_uri_normal }}"{% endif %}>
+    <div class="deck-row-left">
+        <input type="number" class="deck-row-count" value="{{ card.count }}" min="0" max="99">
+        <span class="deck-row-name">
+            {{ card.name }}
+            {% if card.owned_count == 0 %}<span class="deck-unowned-badge">not owned</span>{% endif %}
+        </span>
+    </div>
+    <div class="deck-row-right">
+        {% if card.mana_cost %}
+        <span class="deck-row-mana">{{ card.mana_cost | format_mana_cost | safe }}</span>
+        {% endif %}
+        <button class="deck-row-remove" title="Remove from deck">×</button>
+    </div>
+</div>
