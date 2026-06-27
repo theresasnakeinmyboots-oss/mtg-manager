@@ -7,6 +7,20 @@ def get_db():
     db.row_factory = sqlite3.Row
     return db
 
+def get_setting(db, key, default=None):
+    row = db.execute('SELECT value FROM app_settings WHERE key=?', [key]).fetchone()
+    return row['value'] if row else default
+
+
+def set_setting(db, key, value):
+    db.execute(
+        'INSERT INTO app_settings (key, value) VALUES (?, ?) '
+        'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+        [key, str(value)]
+    )
+    db.commit()
+
+
 def init_db():
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     db = get_db()

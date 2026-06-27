@@ -1,0 +1,32 @@
+{% if alternatives %}
+<div class="alt-printings">
+    <div class="alt-printings-header">
+        <h3 class="alt-printings-title">Other Printings <span class="alt-count" id="altCount">({{ alternatives|length }})</span></h3>
+        <input type="text" id="altFilter" class="alt-filter-input" placeholder="Filter by set…" autocomplete="off">
+    </div>
+    <div class="alt-carousel">
+        {% for alt in alternatives %}
+        <div class="alt-thumb {% if alt.scryfall_id == card.scryfall_id %}alt-current{% endif %}"
+             data-scryfall-id="{{ alt.scryfall_id }}"
+             data-set-name="{{ alt.set_name|lower }}"
+             title="{{ alt.set_name }} #{{ alt.collector_number }}">
+            {% if alt.image_uri_normal %}
+            <img src="{{ alt.image_uri_normal }}" alt="{{ card.name }} — {{ alt.set_name }}" loading="lazy">
+            {% else %}
+            <div class="alt-no-image">{{ alt.set_code }}</div>
+            {% endif %}
+            <div class="alt-label">{{ alt.set_name }} #{{ alt.collector_number }}</div>
+            {% if alt.scryfall_id != card.scryfall_id %}
+                {% if can_switch %}
+                <button class="alt-switch-btn btn btn-primary btn-sm" data-scryfall-id="{{ alt.scryfall_id }}">Use this</button>
+                {% else %}
+                <a class="alt-switch-btn btn btn-secondary btn-sm" href="/card/{{ alt.scryfall_id }}">View</a>
+                {% endif %}
+            {% else %}
+            <div class="alt-current-label">Current</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}

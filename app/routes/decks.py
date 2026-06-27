@@ -10,6 +10,7 @@ FORMAT_RULES = {
     'pioneer':   {'min_main': 60, 'max_main': None, 'max_side': 15, 'max_copies': 4,  'singleton': False, 'commander': False},
     'legacy':    {'min_main': 60, 'max_main': None, 'max_side': 15, 'max_copies': 4,  'singleton': False, 'commander': False},
     'commander': {'min_main': 99, 'max_main': 99,   'max_side': 0,  'max_copies': 1,  'singleton': True,  'commander': True},
+    'sealed':    {'min_main': 40, 'max_main': None, 'max_side': None, 'max_copies': None, 'singleton': False, 'commander': False},
 }
 
 BASIC_LANDS = {'Plains', 'Island', 'Swamp', 'Mountain', 'Forest',
@@ -18,7 +19,7 @@ BASIC_LANDS = {'Plains', 'Island', 'Swamp', 'Mountain', 'Forest',
 
 FORMAT_LABELS = {
     'standard': 'Standard', 'modern': 'Modern', 'pioneer': 'Pioneer',
-    'legacy': 'Legacy', 'commander': 'Commander / EDH',
+    'legacy': 'Legacy', 'commander': 'Commander / EDH', 'sealed': 'Sealed',
 }
 
 
@@ -48,10 +49,11 @@ def _validate_deck(cards, fmt):
         if rules['max_side'] is not None and side_count > rules['max_side']:
             errors.append(f'Sideboard can have at most {rules["max_side"]} cards (currently {side_count})')
 
-    # Copy limit
-    for c in main + side:
-        if c['name'] not in BASIC_LANDS and c['count'] > rules['max_copies']:
-            errors.append(f'{c["name"]}: max {rules["max_copies"]} copies (have {c["count"]})')
+    # Copy limit (sealed has no copy limit)
+    if rules['max_copies'] is not None:
+        for c in main + side:
+            if c['name'] not in BASIC_LANDS and c['count'] > rules['max_copies']:
+                errors.append(f'{c["name"]}: max {rules["max_copies"]} copies (have {c["count"]})')
 
     return errors
 
@@ -71,8 +73,19 @@ def _deck_with_ownership(db, deck_id):
                 JOIN cards k2 ON c2.card_id = k2.id
                 WHERE LOWER(k2.name) = LOWER(dc.name)
             ), 0) AS owned_count,
+            (
+                -- Only link to a collection row when it's the exact printing the deck
+                -- specifies. A different owned printing of the same card does NOT count —
+                -- that's a mismatch to flag during reconciliation, not a thing to link past.
+                -- Join through cards.scryfall_id too: collection.scryfall_id is a denormalized
+                -- copy that can lag behind (e.g. a stale import), so don't trust it alone.
+                SELECT MIN(c3.id) FROM collection c3
+                LEFT JOIN cards k3 ON c3.card_id = k3.id
+                WHERE c3.scryfall_id = dc.scryfall_id OR k3.scryfall_id = dc.scryfall_id
+            ) AS collection_row_id,
             b.image_uri_normal, b.type_line, b.mana_cost, b.rarity,
-            b.colors, b.cmc, b.power, b.toughness, b.color_identity, b.oracle_text
+            b.colors, b.cmc, b.power, b.toughness, b.color_identity, b.oracle_text,
+            b.set_name, b.set_code, b.collector_number
         FROM deck_cards dc
         LEFT JOIN scryfall_bulk b ON dc.scryfall_id = b.scryfall_id
         WHERE dc.deck_id = ?
@@ -141,25 +154,55 @@ def index():
 
 @decks_bp.route('/new', methods=['GET', 'POST'])
 def new():
+    db = get_db()
+    collections = db.execute(
+        "SELECT id, name FROM collections WHERE is_staging=0 ORDER BY name"
+    ).fetchall()
     if request.method == 'POST':
         name   = request.form.get('name', '').strip()
         fmt    = request.form.get('format', '').strip()
         desc   = request.form.get('description', '').strip()
+        sealed_collection_id = request.form.get('sealed_collection_id', '').strip() or None
         if not name or fmt not in FORMAT_RULES:
+            db.close()
             return render_template('decks/new.html',
                                    formats=FORMAT_LABELS,
+                                   collections=collections,
                                    error='Name and a valid format are required.',
                                    form=request.form)
-        db = get_db()
         cur = db.execute(
             'INSERT INTO decks (name, format, description, created_at) VALUES (?,?,?,?)',
             [name, fmt, desc, _now()]
         )
         deck_id = cur.lastrowid
+
+        if fmt == 'sealed' and sealed_collection_id:
+            coll_cards = db.execute(
+                '''SELECT col.scryfall_id, col.name, SUM(col.count) as total_count
+                   FROM collection col
+                   WHERE col.collection_id = ?
+                   GROUP BY col.scryfall_id, col.name''',
+                [sealed_collection_id]
+            ).fetchall()
+            for card in coll_cards:
+                sid = card['scryfall_id']
+                cname = card['name']
+                cnt = card['total_count'] or 1
+                if not sid:
+                    continue
+                if not cname:
+                    row = db.execute('SELECT name FROM scryfall_bulk WHERE scryfall_id=?', [sid]).fetchone()
+                    cname = row['name'] if row else sid
+                db.execute(
+                    'INSERT INTO deck_cards (deck_id, scryfall_id, name, count, board, added_at) VALUES (?,?,?,?,?,?)',
+                    [deck_id, sid, cname, cnt, 'main', _now()]
+                )
+
         db.commit()
         db.close()
         return redirect(url_for('decks.detail', deck_id=deck_id))
-    return render_template('decks/new.html', formats=FORMAT_LABELS, error=None, form={})
+    db.close()
+    return render_template('decks/new.html', formats=FORMAT_LABELS, collections=collections, error=None, form={})
 
 
 # ── Import a deck list ────────────────────────────────────────────────────────
@@ -311,13 +354,18 @@ def _resolve_dlens_for_deck(dlens_path, datadb_path, db):
 def detail(deck_id):
     db = get_db()
     deck, rows = _deck_with_ownership(db, deck_id)
-    db.close()
+
     if not deck:
+        db.close()
         abort(404)
 
     main_rows = [r for r in rows if r['board'] == 'main']
     side_rows = [r for r in rows if r['board'] == 'side']
     cmd_rows  = [r for r in rows if r['board'] == 'commander']
+
+    printing_mismatch_count = sum(
+        1 for r in rows if r['owned_count'] > 0 and not r['collection_row_id']
+    )
 
     # If everything landed in the commander board (bad import), treat them as mainboard
     # so type grouping and charts still work. Surface a warning instead of a blank page.
@@ -325,6 +373,38 @@ def detail(deck_id):
     if all_in_commander:
         main_rows = cmd_rows
         cmd_rows  = []
+
+    # For commander format: if no card is on the commander board yet, auto-promote
+    # the best guess (highest CMC Legendary Creature, tiebreak alphabetically).
+    if deck['format'] == 'commander' and not cmd_rows and not all_in_commander:
+        eligible = [
+            r for r in main_rows
+            if 'Legendary' in (r['type_line'] or '') and 'Creature' in (r['type_line'] or '')
+        ]
+        if eligible:
+            best = max(eligible, key=lambda r: (int(r['cmc'] or 0), r['name']))
+            db.execute(
+                "UPDATE deck_cards SET board='commander' WHERE id=?", [best['id']]
+            )
+            db.commit()
+            # Reload rows after promotion
+            _, rows = _deck_with_ownership(db, deck_id)
+            main_rows = [r for r in rows if r['board'] == 'main']
+            side_rows = [r for r in rows if r['board'] == 'side']
+            cmd_rows  = [r for r in rows if r['board'] == 'commander']
+
+    db.close()
+
+    # Eligible commanders: Legendary Creatures anywhere in the deck (main or commander board)
+    all_main = main_rows + cmd_rows
+    eligible_commanders = [
+        r for r in all_main
+        if 'Legendary' in (r['type_line'] or '') and 'Creature' in (r['type_line'] or '')
+    ]
+    eligible_commanders.sort(key=lambda r: r['name'])
+
+    # Active commander is whichever card is on the commander board
+    active_commander = cmd_rows[0] if cmd_rows else (eligible_commanders[0] if eligible_commanders else None)
 
     main_groups = _group_cards_by_type(main_rows)
     side_groups = _group_cards_by_type(side_rows)
@@ -519,79 +599,211 @@ def detail(deck_id):
         ]
 
     # ── Deck health checks ────────────────────────────────────────────
-    import re as _re2
-    is_commander = deck['format'] == 'commander'
+    from app.strategy import (STRATEGIES, DEFAULT_STRATEGY,
+                               compute_health, compute_health_sids, detect_strategy)
 
-    def count_oracle(pattern, rows):
-        rx = _re2.compile(pattern, _re2.IGNORECASE)
-        return sum(r['count'] for r in rows if rx.search(r['oracle_text'] or ''))
+    all_rows = [dict(r) for r in main_rows + cmd_rows]
+    non_land_rows = [r for r in all_rows if 'Land' not in (r['type_line'] or '')]
 
-    all_rows = main_rows + cmd_rows
+    strategy_key = deck['strategy'] or DEFAULT_STRATEGY
+    deck_health  = compute_health(all_rows, strategy_key, deck['format'] == 'commander', deck_format=deck['format'])
+    health_sids  = compute_health_sids(all_rows, strategy_key, deck_format=deck['format'])
+    chart_health_sids = _json.dumps(health_sids)
 
-    removal_count = count_oracle(
-        r'destroy target|exile target|deals \d+ damage to (any target|target creature|each creature)|'
-        r'-\d+/-\d+|return target .* to (its owner|their owner)\'s hand|'
-        r'counter target (spell|creature|artifact|enchantment)',
-        all_rows
-    )
-    draw_count = count_oracle(
-        r'draw (a|two|three|\d+) card|investigate|whenever .* draw|'
-        r'look at the top \d+ card|scry \d',
-        all_rows
-    )
-    ramp_count = count_oracle(
-        r'search your library for (a|up to \d+) (basic )?land|'
-        r'add \{[WUBRGC]\}|add (one|two|\d+) mana|'
-        r'add mana of any|untap target land',
-        all_rows
-    ) + sum(r['count'] for r in all_rows
-            if 'Land' not in (r['type_line'] or '')
-            and ('Artifact' in (r['type_line'] or '') or 'Creature' in (r['type_line'] or ''))
-            and _re2.search(r'add \{', r['oracle_text'] or '', _re2.IGNORECASE))
-    protection_count = count_oracle(
-        r'hexproof|indestructible|regenerate|shroud|ward|'
-        r'counter target spell|can\'t be countered',
-        all_rows
-    )
-    wincon_count = count_oracle(
-        r'players (lose|win) the game|you win the game|'
-        r'deal (infinite|combat) damage|'
-        r'infinite|combo|'
-        r'\binfinite\b',
-        all_rows
-    ) + sum(r['count'] for r in all_rows
-            if 'Land' not in (r['type_line'] or '')
-            and int(r['cmc'] or 0) >= 6
-            and (int(r['power'] or 0) >= 5 if r['power'] and r['power'].lstrip('-').isdigit() else False))
+    # ── Cut candidate scryfall IDs (for deck-view badges) ────────────────
+    # Only computed for commander decks with cached EDHREC data — no live fetch.
+    db = get_db()
 
-    # Thresholds: (label, count, (ok_min, warn_min), tip)
-    if is_commander:
-        health_checks = [
-            ('Removal',    removal_count,    (8, 4),  'Aim for 8–12 in Commander'),
-            ('Card draw',  draw_count,       (8, 4),  'Aim for 8–12 in Commander'),
-            ('Ramp',       ramp_count,       (10, 5), 'Aim for 10+ in Commander'),
-            ('Protection', protection_count, (4, 2),  'Hexproof, indestructible, counterspells'),
-            ('Win cons',   wincon_count,     (3, 1),  'Big threats or game-winning combos'),
-        ]
-    else:
-        health_checks = [
-            ('Removal',    removal_count,    (6, 3),  'Aim for 6–10 in 60-card decks'),
-            ('Card draw',  draw_count,       (6, 3),  'Aim for 6–10 in 60-card decks'),
-            ('Ramp',       ramp_count,       (4, 2),  'Aim for 4+ in 60-card decks'),
-            ('Protection', protection_count, (3, 1),  'Hexproof, indestructible, counterspells'),
-            ('Win cons',   wincon_count,     (4, 2),  'Your main threats or combo pieces'),
-        ]
+    # Load muted health checks for this deck
+    muted_checks = {r['check_name'] for r in
+                    db.execute('SELECT check_name FROM deck_health_mutes WHERE deck_id=?',
+                               [deck_id]).fetchall()}
 
-    # tag each as ok / warn / low
-    def health_tag(count, ok_min, warn_min):
-        if count >= ok_min:   return 'ok'
-        if count >= warn_min: return 'warn'
-        return 'low'
+    # Load or run strategy detection
+    last_detection = db.execute(
+        'SELECT * FROM deck_strategy_feedback WHERE deck_id=? ORDER BY detected_at DESC LIMIT 1',
+        [deck_id]
+    ).fetchone()
+    strategy_detection = dict(last_detection) if last_detection else None
 
-    deck_health = [
-        (label, count, health_tag(count, ok, warn), tip)
-        for label, count, (ok, warn), tip in health_checks
-    ]
+    cut_sids = set()
+    cut_candidates = []
+    if deck['format'] == 'commander' and active_commander and cmd_rows:
+        from app.edhrec import _name_to_slug as _edhrec_slug
+        slug = _edhrec_slug(active_commander['name'])
+        cache_row = db.execute(
+            'SELECT 1 FROM edhrec_cache WHERE slug = ?', [slug]
+        ).fetchone()
+        if cache_row:
+            edhrec_lookup = {}
+            for ec in db.execute(
+                'SELECT name, synergy FROM edhrec_cards WHERE slug = ?', [slug]
+            ).fetchall():
+                nl = ec['name'].lower()
+                if nl not in edhrec_lookup or ec['synergy'] > edhrec_lookup[nl]:
+                    edhrec_lookup[nl] = ec['synergy']
+
+            import re as _cre2
+            _rem2  = _cre2.compile(r'destroy target|exile target|deals \d+ damage to (any target|target creature|each creature)|-\d+/-\d+|return target .* to (its owner|their owner)\'s hand|counter target (spell|creature|artifact|enchantment)', _cre2.IGNORECASE)
+            _drw2  = _cre2.compile(r'draw (a|two|three|\d+) card|investigate|whenever .* draw|look at the top \d+ card|scry \d', _cre2.IGNORECASE)
+            _rmp2  = _cre2.compile(r'search your library for (a|up to \d+) (basic )?land|add \{[WUBRGC]\}|add (one|two|\d+) mana|add mana of any|untap target land', _cre2.IGNORECASE)
+            _prt2  = _cre2.compile(r'hexproof|indestructible|regenerate|shroud|ward|\bprotection\b|counter target spell|can\'t be countered', _cre2.IGNORECASE)
+            _wcn2  = _cre2.compile(r'players (lose|win) the game|you win the game|\binfinite\b', _cre2.IGNORECASE)
+            BASICS = {'plains','island','swamp','mountain','forest',
+                      'wastes','snow-covered plains','snow-covered island',
+                      'snow-covered swamp','snow-covered mountain','snow-covered forest'}
+            cmd_name_lower = active_commander['name'].lower()
+            for r in main_rows + cmd_rows:
+                nl = r['name'].lower()
+                if nl in BASICS or nl == cmd_name_lower:
+                    continue
+                if 'Land' in (r['type_line'] or '') and 'Creature' not in (r['type_line'] or ''):
+                    continue
+                raw_syn = edhrec_lookup.get(nl)
+                syn_c = ((raw_syn + 1.0) / 2.0) if raw_syn is not None else 0.2
+                oracle = r['oracle_text'] or ''
+                cats = sum([
+                    bool(_rem2.search(oracle)), bool(_drw2.search(oracle)),
+                    bool(_rmp2.search(oracle)), bool(_prt2.search(oracle)),
+                    bool(_wcn2.search(oracle)),
+                ])
+                health_c = min(cats / 2.0, 1.0)
+                keep_score = 0.6 * syn_c + 0.4 * health_c
+                cut_candidates.append({
+                    'scryfall_id':      r['scryfall_id'],
+                    'name':             r['name'],
+                    'type_line':        r['type_line'],
+                    'image_uri_normal': r['image_uri_normal'],
+                    'synergy':          raw_syn,
+                    'health_score':     health_c,
+                    'keep_score':       keep_score,
+                })
+
+            cut_candidates.sort(key=lambda c: c['keep_score'])
+            cut_candidates = cut_candidates[:20]
+            cut_sids = {c['scryfall_id'] for c in cut_candidates}
+
+    # ── Suggestion cards for inline display (cached EDHREC only) ─────────
+    # sugg_by_type: same type-order keys as _group_cards_by_type, each value
+    # is a list of suggestion card dicts (not in deck, sorted by synergy desc).
+    sugg_by_type = {}
+    sugg_per_type_limit = 7
+    if deck['format'] == 'commander' and active_commander:
+        from app.edhrec import _name_to_slug as _slug2
+        _slug2_val = _slug2(active_commander['name'])
+        if db.execute('SELECT 1 FROM edhrec_cache WHERE slug=?', [_slug2_val]).fetchone():
+            deck_names_lower = {r['name'].lower() for r in rows}
+            owned_names_lower2 = set(
+                r['name'].lower() for r in
+                db.execute('SELECT DISTINCT LOWER(k.name) as name FROM collection c JOIN cards k ON c.card_id=k.id').fetchall()
+            )
+            sugg_rows2 = db.execute('''
+                SELECT ec.name, ec.scryfall_id, ec.synergy, ec.inclusion, ec.potential_decks,
+                       b.type_line, b.mana_cost, b.image_uri_normal, b.colors, b.price_usd,
+                       b.oracle_text, b.cmc, b.power
+                FROM edhrec_cards ec
+                LEFT JOIN scryfall_bulk b ON ec.scryfall_id = b.scryfall_id
+                WHERE ec.slug = ?
+                ORDER BY ec.synergy DESC, ec.inclusion DESC
+            ''', [_slug2_val]).fetchall()
+
+            import re as _srx
+            _sugg_tags = [
+                ('Ramp',       _srx.compile(r'search your library for (a|up to \d+) (basic )?land|add \{[WUBRGC]\}|add (one|two|\d+) mana|add mana of any|untap target land', _srx.I)),
+                ('Removal',    _srx.compile(r'destroy target|exile target|deals \d+ damage to (any target|target creature|each creature)|-\d+/-\d+|return target .* to (its owner|their owner)\'s hand|counter target (spell|creature|artifact|enchantment)', _srx.I)),
+                ('Card draw',  _srx.compile(r'draw (a|two|three|\d+) card|investigate|whenever .* draw|look at the top \d+ card|scry \d', _srx.I)),
+                ('Protection', _srx.compile(r'hexproof|indestructible|regenerate|shroud|ward|\bprotection\b|counter target spell|can\'t be countered', _srx.I)),
+                ('Tokens',     _srx.compile(r'create[s]? \w+ [\w\s]+ token|put[s]? \w+ [\w\s]+ token|populate', _srx.I)),
+                ('Tutor',      _srx.compile(r'search your library for .* card', _srx.I)),
+                ('Life gain',  _srx.compile(r'you gain \d+ life|gains? \d+ life|lifelink', _srx.I)),
+                ('Win con',    _srx.compile(r'you win the game|players lose the game|\binfinite\b', _srx.I)),
+            ]
+
+            def _sugg_role_tags(oracle, type_line, cmc, power):
+                if not oracle:
+                    return []
+                tags = [label for label, rx in _sugg_tags if rx.search(oracle)]
+                if ('Land' not in (type_line or '') and int(cmc or 0) >= 6
+                        and power and str(power).lstrip('-').isdigit()
+                        and int(power) >= 5):
+                    if 'Win con' not in tags:
+                        tags.append('Threat')
+                return tags[:3]  # cap at 3 to keep the row tidy
+
+            _type_order = ['Commander', 'Creature', 'Planeswalker', 'Instant', 'Sorcery',
+                           'Enchantment', 'Artifact', 'Land', 'Other']
+            _sugg_buckets = {t: [] for t in _type_order}
+            _seen_sugg = set()
+            for r in sugg_rows2:
+                nl = r['name'].lower()
+                if nl in deck_names_lower or nl in _seen_sugg:
+                    continue
+                _seen_sugg.add(nl)
+                tl = r['type_line'] or ''
+                bucket = 'Other'
+                for t in _type_order[:-1]:
+                    if t in tl:
+                        bucket = t
+                        break
+                pct = round(100 * r['inclusion'] / r['potential_decks']) if r['potential_decks'] else 0
+                _sugg_buckets[bucket].append({
+                    'name': r['name'], 'scryfall_id': r['scryfall_id'],
+                    'synergy': r['synergy'], 'pct': pct,
+                    'type_line': tl, 'mana_cost': r['mana_cost'],
+                    'image_uri_normal': r['image_uri_normal'],
+                    'colors': r['colors'] or '[]',
+                    'price_usd': r['price_usd'],
+                    'owned': nl in owned_names_lower2,
+                    'tags': _sugg_role_tags(r['oracle_text'], tl, r['cmc'], r['power']),
+                })
+            # Pass all suggestions uncapped — JS handles the per-type display cap
+            from app.database import get_setting as _get_setting
+            _sugg_limit = int(_get_setting(db, 'suggestions_per_type', 7))
+            sugg_by_type = {t: cards for t, cards in _sugg_buckets.items() if cards}
+            sugg_per_type_limit = _sugg_limit
+
+    # ── Combo detection ───────────────────────────────────────────────────────
+    combos_complete = []
+    combos_near_miss = []
+    if deck['format'] == 'commander' and active_commander:
+        from app.edhrec import get_commander_combos
+        deck_names = {r['name'].lower() for r in
+                      db.execute('SELECT name FROM deck_cards WHERE deck_id=?', [deck_id]).fetchall()}
+        owned_names = {r['name'].lower() for r in
+                       db.execute('SELECT DISTINCT LOWER(k.name) as name FROM collection c JOIN cards k ON c.card_id=k.id').fetchall()}
+
+        raw_combos = get_commander_combos(db, active_commander['name'])
+        for combo in raw_combos:
+            card_names = [c['name'] for c in combo['cards']]
+            missing = [n for n in card_names if n.lower() not in deck_names]
+            if not missing:
+                combos_complete.append({**combo, 'missing': []})
+            elif len(missing) <= 2:
+                combos_near_miss.append({
+                    **combo,
+                    'missing': missing,
+                    'missing_owned': [n for n in missing if n.lower() in owned_names],
+                })
+
+        # Sort: complete by popularity; near-miss by fewest missing then popularity
+        combos_complete.sort(key=lambda c: -c['count'])
+        combos_near_miss.sort(key=lambda c: (len(c['missing']), -c['count']))
+
+        # Enrich all combo cards with image_uri_normal from scryfall_bulk
+        all_sids = list({card['scryfall_id'] for combo in combos_complete + combos_near_miss
+                         for card in combo['cards'] if card.get('scryfall_id')})
+        if all_sids:
+            placeholders = ','.join('?' * len(all_sids))
+            img_rows = db.execute(
+                f'SELECT scryfall_id, image_uri_normal FROM scryfall_bulk WHERE scryfall_id IN ({placeholders})',
+                all_sids
+            ).fetchall()
+            img_map = {r['scryfall_id']: r['image_uri_normal'] for r in img_rows}
+            for combo in combos_complete + combos_near_miss:
+                for card in combo['cards']:
+                    card['image_uri'] = img_map.get(card.get('scryfall_id', ''), '')
+
+    db.close()
 
     return render_template('decks/detail.html',
                            deck=deck,
@@ -602,6 +814,7 @@ def detail(deck_id):
                            side_count=side_count,
                            total_count=total_count,
                            owned_count=owned_count,
+                           printing_mismatch_count=printing_mismatch_count,
                            errors=errors,
                            format_label=FORMAT_LABELS.get(deck['format'], deck['format']),
                            chart_curve=chart_curve,
@@ -612,7 +825,20 @@ def detail(deck_id):
                            draw_probs=draw_probs,
                            land_count=land_count,
                            deck_size=deck_size,
-                           deck_health=deck_health)
+                           deck_health=deck_health,
+                           chart_health_sids=chart_health_sids,
+                           eligible_commanders=eligible_commanders,
+                           active_commander=active_commander,
+                           cut_sids=cut_sids,
+                           cut_candidates=cut_candidates,
+                           sugg_by_type=sugg_by_type,
+                           sugg_per_type_limit=sugg_per_type_limit,
+                           strategy_key=strategy_key,
+                           strategies=STRATEGIES,
+                           muted_checks=muted_checks,
+                           strategy_detection=strategy_detection,
+                           combos_complete=combos_complete,
+                           combos_near_miss=combos_near_miss)
 
 
 # ── Add a card (JSON API) ─────────────────────────────────────────────────────
@@ -728,7 +954,148 @@ def reboard_to_main(deck_id):
     return redirect(url_for('decks.detail', deck_id=deck_id))
 
 
+# ── Printing reconciliation ────────────────────────────────────────────────────
+# When a deck card's exact printing isn't in the collection, but a different
+# printing of the same name is, the user must decide per-card whether the deck
+# list or the collection record is "wrong". There's no safe automatic answer.
+
+@decks_bp.route('/<int:deck_id>/reconcile')
+def reconcile(deck_id):
+    db = get_db()
+    deck = db.execute('SELECT * FROM decks WHERE id = ?', [deck_id]).fetchone()
+    if not deck:
+        db.close()
+        abort(404)
+
+    deck_cards = db.execute('''
+        SELECT dc.id, dc.scryfall_id, dc.name, dc.count, dc.board,
+               b.set_name, b.collector_number, b.image_uri_normal
+        FROM deck_cards dc
+        LEFT JOIN scryfall_bulk b ON dc.scryfall_id = b.scryfall_id
+        WHERE dc.deck_id = ?
+        ORDER BY dc.name
+    ''', [deck_id]).fetchall()
+
+    mismatches = []
+    for dc in deck_cards:
+        # Join through cards.scryfall_id too: collection.scryfall_id is a denormalized
+        # copy that can lag behind, so don't trust it alone for the exact-match check.
+        has_exact = db.execute('''
+            SELECT 1 FROM collection c
+            LEFT JOIN cards k ON c.card_id = k.id
+            WHERE c.scryfall_id = ? OR k.scryfall_id = ?
+            LIMIT 1
+        ''', [dc['scryfall_id'], dc['scryfall_id']]).fetchone()
+        if has_exact:
+            continue
+
+        owned_printings = db.execute('''
+            SELECT c.id as collection_row_id, COALESCE(c.scryfall_id, k.scryfall_id) as scryfall_id,
+                   c.count, c.foil, c.condition,
+                   b.set_name, b.collector_number, b.image_uri_normal
+            FROM collection c
+            JOIN cards k ON c.card_id = k.id
+            LEFT JOIN scryfall_bulk b ON COALESCE(c.scryfall_id, k.scryfall_id) = b.scryfall_id
+            WHERE LOWER(k.name) = LOWER(?)
+            ORDER BY b.set_name
+        ''', [dc['name']]).fetchall()
+
+        if owned_printings:
+            mismatches.append({
+                'deck_card': dict(dc),
+                'owned_printings': [dict(p) for p in owned_printings],
+            })
+
+    db.close()
+    return render_template('decks/reconcile.html', deck=deck, mismatches=mismatches)
+
+
+@decks_bp.route('/<int:deck_id>/reconcile/use-deck-printing', methods=['POST'])
+def reconcile_use_deck_printing(deck_id):
+    """The deck list is correct — update the chosen owned collection row to that printing."""
+    data = request.get_json(force=True)
+    deck_card_id = data.get('deck_card_id')
+    collection_row_id = data.get('collection_row_id')
+    if not deck_card_id or not collection_row_id:
+        return jsonify(error='deck_card_id and collection_row_id required'), 400
+
+    db = get_db()
+    dc = db.execute('SELECT * FROM deck_cards WHERE id = ? AND deck_id = ?', [deck_card_id, deck_id]).fetchone()
+    coll_row = db.execute('SELECT * FROM collection WHERE id = ?', [collection_row_id]).fetchone()
+    if not dc or not coll_row:
+        db.close()
+        return jsonify(error='Not found'), 404
+
+    target_card = db.execute('SELECT id FROM cards WHERE scryfall_id = ?', [dc['scryfall_id']]).fetchone()
+    if target_card:
+        target_card_id = target_card['id']
+    else:
+        bulk = db.execute('SELECT * FROM scryfall_bulk WHERE scryfall_id = ?', [dc['scryfall_id']]).fetchone()
+        if not bulk:
+            db.close()
+            return jsonify(error='Printing not found in bulk data'), 404
+        cursor = db.execute('''
+            INSERT INTO cards (scryfall_id, name, set_code, set_name, collector_number,
+                mana_cost, cmc, colors, color_identity, type_line, oracle_text, flavor_text,
+                power, toughness, rarity, legalities, image_uri_normal, image_uri_small,
+                artist, enriched_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+        ''', (bulk['scryfall_id'], bulk['name'], bulk['set_code'], bulk['set_name'],
+              bulk['collector_number'], bulk['mana_cost'], bulk['cmc'], bulk['colors'],
+              bulk['color_identity'], bulk['type_line'], bulk['oracle_text'], bulk['flavor_text'],
+              bulk['power'], bulk['toughness'], bulk['rarity'], bulk['legalities'],
+              bulk['image_uri_normal'], bulk['image_uri_small'], bulk['artist']))
+        target_card_id = cursor.lastrowid
+
+    bulk_edition = db.execute(
+        'SELECT set_name, collector_number FROM scryfall_bulk WHERE scryfall_id = ?', [dc['scryfall_id']]
+    ).fetchone()
+    new_edition = bulk_edition['set_name'] if bulk_edition else coll_row['edition']
+    new_card_number = bulk_edition['collector_number'] if bulk_edition else coll_row['card_number']
+
+    db.execute(
+        'UPDATE collection SET card_id = ?, scryfall_id = ?, edition = ?, card_number = ? WHERE id = ?',
+        (target_card_id, dc['scryfall_id'], new_edition, new_card_number, collection_row_id)
+    )
+    db.commit()
+    db.close()
+    return jsonify(success=True)
+
+
+@decks_bp.route('/<int:deck_id>/reconcile/use-collection-printing', methods=['POST'])
+def reconcile_use_collection_printing(deck_id):
+    """The collection is correct — update the deck list to reference the owned printing."""
+    data = request.get_json(force=True)
+    deck_card_id = data.get('deck_card_id')
+    scryfall_id = data.get('scryfall_id', '').strip()
+    if not deck_card_id or not scryfall_id:
+        return jsonify(error='deck_card_id and scryfall_id required'), 400
+
+    db = get_db()
+    dc = db.execute('SELECT * FROM deck_cards WHERE id = ? AND deck_id = ?', [deck_card_id, deck_id]).fetchone()
+    if not dc:
+        db.close()
+        return jsonify(error='Not found'), 404
+
+    db.execute('UPDATE deck_cards SET scryfall_id = ? WHERE id = ?', [scryfall_id, deck_card_id])
+    db.commit()
+    db.close()
+    return jsonify(success=True)
+
+
 # ── Delete deck ───────────────────────────────────────────────────────────────
+
+@decks_bp.route('/<int:deck_id>/rename', methods=['POST'])
+def rename_deck(deck_id):
+    name = (request.json or {}).get('name', '').strip()
+    if not name:
+        return jsonify(error='Name cannot be empty'), 400
+    db = get_db()
+    db.execute('UPDATE decks SET name=? WHERE id=?', [name, deck_id])
+    db.commit()
+    db.close()
+    return jsonify(ok=True, name=name)
+
 
 @decks_bp.route('/<int:deck_id>/delete', methods=['POST'])
 def delete_deck(deck_id):
@@ -739,7 +1106,142 @@ def delete_deck(deck_id):
     return redirect(url_for('decks.index'))
 
 
+# ── Clone deck ────────────────────────────────────────────────────────────────
+
+@decks_bp.route('/<int:deck_id>/clone', methods=['POST'])
+def clone_deck(deck_id):
+    db = get_db()
+    src = db.execute('SELECT * FROM decks WHERE id=?', [deck_id]).fetchone()
+    if not src:
+        db.close()
+        abort(404)
+    cur = db.execute(
+        'INSERT INTO decks (name, format, description, created_at) VALUES (?,?,?,?)',
+        [f'{src["name"]} (copy)', src['format'], src['description'], _now()]
+    )
+    new_id = cur.lastrowid
+    db.execute('''
+        INSERT INTO deck_cards (deck_id, scryfall_id, name, count, board, added_at)
+        SELECT ?, scryfall_id, name, count, board, ?
+        FROM deck_cards WHERE deck_id=?
+    ''', [new_id, _now(), deck_id])
+    db.commit()
+    db.close()
+    return redirect(url_for('decks.detail', deck_id=new_id))
+
+
 # ── List decks as JSON (for context menu) ────────────────────────────────────
+
+@decks_bp.route('/<int:deck_id>/set-commander', methods=['POST'])
+def set_commander(deck_id):
+    data = request.get_json(force=True)
+    new_sid = data.get('scryfall_id', '').strip()
+    db = get_db()
+    if not db.execute('SELECT 1 FROM decks WHERE id=?', [deck_id]).fetchone():
+        db.close()
+        return jsonify(error='Deck not found'), 404
+
+    # Move current commander board card(s) back to main
+    db.execute(
+        "UPDATE deck_cards SET board='main' WHERE deck_id=? AND board='commander'",
+        [deck_id]
+    )
+    # Move the chosen card to the commander board
+    db.execute(
+        "UPDATE deck_cards SET board='commander' WHERE deck_id=? AND scryfall_id=?",
+        [deck_id, new_sid]
+    )
+    db.commit()
+
+    name = ''
+    row = db.execute('SELECT name FROM scryfall_bulk WHERE scryfall_id=? LIMIT 1', [new_sid]).fetchone()
+    if row:
+        name = row['name']
+    db.close()
+    return jsonify(ok=True, name=name)
+
+
+@decks_bp.route('/<int:deck_id>/set-strategy', methods=['POST'])
+def set_strategy(deck_id):
+    data = request.get_json(force=True)
+    strategy = data.get('strategy', '').strip()
+    from app.strategy import STRATEGIES
+    if strategy not in STRATEGIES:
+        return jsonify(error='Unknown strategy'), 400
+    db = get_db()
+    if not db.execute('SELECT 1 FROM decks WHERE id=?', [deck_id]).fetchone():
+        db.close()
+        return jsonify(error='Deck not found'), 404
+    db.execute('UPDATE decks SET strategy=? WHERE id=?', [strategy, deck_id])
+    db.commit()
+    db.close()
+    return jsonify(ok=True)
+
+
+@decks_bp.route('/<int:deck_id>/mute-check', methods=['POST'])
+def mute_check(deck_id):
+    data = request.get_json(force=True)
+    check_name = data.get('check_name', '').strip()
+    if not check_name:
+        return jsonify(error='check_name required'), 400
+    db = get_db()
+    db.execute('INSERT OR IGNORE INTO deck_health_mutes (deck_id, check_name) VALUES (?,?)',
+               [deck_id, check_name])
+    db.commit()
+    db.close()
+    return jsonify(ok=True)
+
+
+@decks_bp.route('/<int:deck_id>/unmute-check', methods=['POST'])
+def unmute_check(deck_id):
+    data = request.get_json(force=True)
+    check_name = data.get('check_name', '').strip()
+    db = get_db()
+    db.execute('DELETE FROM deck_health_mutes WHERE deck_id=? AND check_name=?',
+               [deck_id, check_name])
+    db.commit()
+    db.close()
+    return jsonify(ok=True)
+
+
+@decks_bp.route('/<int:deck_id>/detect-strategy', methods=['POST'])
+def detect_strategy_route(deck_id):
+    from app.strategy import detect_strategy, save_detection
+    db = get_db()
+    deck = db.execute('SELECT * FROM decks WHERE id=?', [deck_id]).fetchone()
+    if not deck:
+        db.close()
+        return jsonify(error='Deck not found'), 404
+    rows = db.execute('''
+        SELECT dc.name, dc.count, dc.board,
+               b.oracle_text, b.type_line, b.cmc, b.power, b.toughness
+        FROM deck_cards dc
+        LEFT JOIN scryfall_bulk b ON dc.scryfall_id = b.scryfall_id
+        WHERE dc.deck_id = ?
+    ''', [deck_id]).fetchall()
+    cmd_row = db.execute(
+        "SELECT name FROM deck_cards WHERE deck_id=? AND board='commander' LIMIT 1",
+        [deck_id]
+    ).fetchone()
+    detection = detect_strategy([dict(r) for r in rows],
+                                 commander=cmd_row['name'] if cmd_row else None)
+    save_detection(db, deck_id, detection)
+    db.close()
+    return jsonify(detection)
+
+
+@decks_bp.route('/<int:deck_id>/rate-detection', methods=['POST'])
+def rate_detection_route(deck_id):
+    from app.strategy import rate_detection
+    data = request.get_json(force=True)
+    rating = data.get('rating')
+    if rating not in (0, 1):
+        return jsonify(error='rating must be 0 or 1'), 400
+    db = get_db()
+    rate_detection(db, deck_id, rating)
+    db.close()
+    return jsonify(ok=True)
+
 
 @decks_bp.route('/api/list')
 def api_list():
@@ -747,3 +1249,380 @@ def api_list():
     rows = db.execute('SELECT id, name, format FROM decks ORDER BY name').fetchall()
     db.close()
     return jsonify([dict(r) for r in rows])
+
+
+# ── EDHREC suggestions ────────────────────────────────────────────────────────
+
+@decks_bp.route('/<int:deck_id>/suggestions')
+def suggestions(deck_id):
+    from app.edhrec import get_edhrec_data, CACHE_TTL_DAYS
+    import json as _json
+
+    db = get_db()
+    deck = db.execute('SELECT * FROM decks WHERE id = ?', [deck_id]).fetchone()
+    if not deck:
+        db.close()
+        abort(404)
+
+    # Active commander = whatever is on the commander board.
+    # Fall back to first Legendary Creature in mainboard if commander board is empty.
+    commander = db.execute(
+        "SELECT dc.name, dc.scryfall_id FROM deck_cards dc "
+        "WHERE dc.deck_id=? AND dc.board='commander' LIMIT 1", [deck_id]
+    ).fetchone()
+    if not commander:
+        commander = db.execute(
+            "SELECT dc.name, dc.scryfall_id FROM deck_cards dc "
+            "LEFT JOIN scryfall_bulk b ON dc.scryfall_id = b.scryfall_id "
+            "WHERE dc.deck_id=? AND b.type_line LIKE '%Legendary%Creature%' "
+            "ORDER BY b.cmc DESC, dc.name LIMIT 1", [deck_id]
+        ).fetchone()
+
+    # Cards already in the deck (by name, lowercase) for deduplication
+    deck_card_names = set(
+        r['name'].lower() for r in
+        db.execute('SELECT name FROM deck_cards WHERE deck_id = ?', [deck_id]).fetchall()
+    )
+
+    # Owned card names (for "owned" flag on suggestions)
+    owned_names = set(
+        r['name'].lower() for r in
+        db.execute('''SELECT DISTINCT LOWER(k.name) as name
+                      FROM collection c JOIN cards k ON c.card_id = k.id''').fetchall()
+    )
+
+    edhrec_data = None
+    error = None
+    force = request.args.get('refresh') == '1'
+
+    if commander:
+        edhrec_data = get_edhrec_data(db, commander['name'], force_refresh=force)
+        if edhrec_data is None:
+            error = f"No EDHREC data found for '{commander['name']}'. It may not be recognised as a commander."
+
+    # Build suggestion lists from edhrec_cards, joined against scryfall_bulk
+    # Group into: high synergy, owned suggestions, cards to consider buying
+    high_synergy = []
+    owned_suggestions = []
+    buy_suggestions = []
+    cut_candidates = []
+
+    if edhrec_data:
+        # Get color identity of deck from commander card in scryfall_bulk
+        color_identity = []
+        if commander:
+            bulk = db.execute(
+                'SELECT color_identity FROM scryfall_bulk WHERE scryfall_id = ? LIMIT 1',
+                [commander['scryfall_id']]
+            ).fetchone()
+            if bulk:
+                try:
+                    color_identity = _json.loads(bulk['color_identity'] or '[]')
+                except Exception:
+                    color_identity = []
+
+        # Pull all EDHREC suggestions, joined to scryfall_bulk for local data
+        rows = db.execute('''
+            SELECT ec.name, ec.tag, ec.synergy, ec.inclusion, ec.num_decks,
+                   ec.potential_decks, ec.scryfall_id,
+                   b.type_line, b.mana_cost, b.cmc, b.image_uri_normal,
+                   b.price_usd, b.color_identity as card_color_identity
+            FROM edhrec_cards ec
+            LEFT JOIN scryfall_bulk b ON ec.scryfall_id = b.scryfall_id
+            WHERE ec.slug = ?
+            ORDER BY ec.synergy DESC, ec.inclusion DESC
+        ''', [edhrec_data['slug']]).fetchall()
+
+        seen_names = set()
+        for r in rows:
+            name_lower = r['name'].lower()
+            if name_lower in deck_card_names:
+                continue
+            if name_lower in seen_names:
+                continue
+            seen_names.add(name_lower)
+
+            card = dict(r)
+            card['owned'] = name_lower in owned_names
+            card['pct'] = round(100 * r['inclusion'] / r['potential_decks']) if r['potential_decks'] else 0
+
+            if r['tag'] in ('highsynergycards', 'newcards', 'gamechangers'):
+                high_synergy.append(card)
+            if card['owned']:
+                owned_suggestions.append(card)
+            else:
+                buy_suggestions.append(card)
+
+        # Sort
+        high_synergy.sort(key=lambda c: (-c['synergy'], -c['inclusion']))
+        owned_suggestions.sort(key=lambda c: (-c['synergy'], -c['inclusion']))
+        buy_suggestions.sort(key=lambda c: (-c['synergy'], -c['inclusion']))
+
+        # Cap lists
+        from app.database import get_setting as _get_setting2
+        _sugg_limit2 = int(_get_setting2(db, 'suggestions_per_type', 7))
+        high_synergy      = high_synergy[:_sugg_limit2 * 3]
+        owned_suggestions = owned_suggestions[:_sugg_limit2 * 6]
+        buy_suggestions   = buy_suggestions[:_sugg_limit2 * 6]
+
+        # ── Cut candidates: cards already in deck with low keep score ──
+        # Score = 0.6 * synergy_component + 0.4 * health_component
+        # Lower score = weaker card = better cut candidate
+        import re as _cre
+        edhrec_slug = edhrec_data['slug']
+
+        # Build EDHREC lookup: card name (lower) → synergy score
+        edhrec_lookup = {}
+        for ec in db.execute(
+            'SELECT name, synergy FROM edhrec_cards WHERE slug = ?', [edhrec_slug]
+        ).fetchall():
+            name_lower = ec['name'].lower()
+            if name_lower not in edhrec_lookup or ec['synergy'] > edhrec_lookup[name_lower]:
+                edhrec_lookup[name_lower] = ec['synergy']
+
+        # Health regexes (same as detail view)
+        _removal_rx    = _cre.compile(r'destroy target|exile target|deals \d+ damage to (any target|target creature|each creature)|-\d+/-\d+|return target .* to (its owner|their owner)\'s hand|counter target (spell|creature|artifact|enchantment)', _cre.IGNORECASE)
+        _draw_rx       = _cre.compile(r'draw (a|two|three|\d+) card|investigate|whenever .* draw|look at the top \d+ card|scry \d', _cre.IGNORECASE)
+        _ramp_rx       = _cre.compile(r'search your library for (a|up to \d+) (basic )?land|add \{[WUBRGC]\}|add (one|two|\d+) mana|add mana of any|untap target land', _cre.IGNORECASE)
+        _protect_rx    = _cre.compile(r'hexproof|indestructible|regenerate|shroud|ward|\bprotection\b|counter target spell|can\'t be countered', _cre.IGNORECASE)
+        _wincon_rx     = _cre.compile(r'players (lose|win) the game|you win the game|deal (infinite|combat) damage|\binfinite\b', _cre.IGNORECASE)
+
+        def _health_score(oracle, type_line, cmc, power):
+            """Return 0.0–1.0 based on how many health categories a card covers."""
+            if not oracle:
+                return 0.0
+            cats = 0
+            if _removal_rx.search(oracle):  cats += 1
+            if _draw_rx.search(oracle):     cats += 1
+            if _ramp_rx.search(oracle):     cats += 1
+            if _protect_rx.search(oracle):  cats += 1
+            if _wincon_rx.search(oracle):   cats += 1
+            # Big threats count as win con
+            if ('Land' not in (type_line or '') and int(cmc or 0) >= 6
+                    and power and str(power).lstrip('-').isdigit()
+                    and int(power) >= 5):
+                cats += 1
+            return min(cats / 2.0, 1.0)  # saturates at 2 categories = 1.0
+
+        deck_cards_full = db.execute('''
+            SELECT dc.id, dc.scryfall_id, dc.name, dc.count, dc.board,
+                   b.type_line, b.mana_cost, b.image_uri_normal,
+                   b.oracle_text, b.cmc, b.power, b.price_usd
+            FROM deck_cards dc
+            LEFT JOIN scryfall_bulk b ON dc.scryfall_id = b.scryfall_id
+            WHERE dc.deck_id = ?
+        ''', [deck_id]).fetchall()
+
+        BASIC_LAND_NAMES = {'plains','island','swamp','mountain','forest',
+                            'wastes','snow-covered plains','snow-covered island',
+                            'snow-covered swamp','snow-covered mountain','snow-covered forest'}
+        commander_name_lower = commander['name'].lower() if commander else ''
+
+        for dc in deck_cards_full:
+            name_lower = dc['name'].lower()
+            # Skip basics and the commander itself
+            if name_lower in BASIC_LAND_NAMES or name_lower == commander_name_lower:
+                continue
+            # Skip pure lands (no oracle synergy signal)
+            if 'Land' in (dc['type_line'] or '') and 'Creature' not in (dc['type_line'] or ''):
+                continue
+
+            # EDHREC synergy: normalise to 0–1 range (synergy is typically -1.0 to +1.0)
+            raw_syn = edhrec_lookup.get(name_lower)
+            if raw_syn is not None:
+                # Map -1..+1 → 0..1; missing from EDHREC = 0.2 (unknown, slight penalty)
+                syn_component = (raw_syn + 1.0) / 2.0
+                in_edhrec = True
+            else:
+                syn_component = 0.2
+                in_edhrec = False
+
+            health_component = _health_score(
+                dc['oracle_text'], dc['type_line'], dc['cmc'], dc['power']
+            )
+
+            keep_score = 0.6 * syn_component + 0.4 * health_component
+
+            cut_candidates.append({
+                'deck_card_id':   dc['id'],
+                'scryfall_id':    dc['scryfall_id'],
+                'name':           dc['name'],
+                'type_line':      dc['type_line'],
+                'mana_cost':      dc['mana_cost'],
+                'image_uri_normal': dc['image_uri_normal'],
+                'price_usd':      dc['price_usd'],
+                'board':          dc['board'],
+                'synergy':        raw_syn,
+                'in_edhrec':      in_edhrec,
+                'health_score':   health_component,
+                'keep_score':     keep_score,
+            })
+
+        # Sort worst keep score first, cap at 20
+        cut_candidates.sort(key=lambda c: c['keep_score'])
+        cut_candidates = cut_candidates[:20]
+
+    db.close()
+    return render_template('decks/suggestions.html',
+                           deck=deck,
+                           commander=commander,
+                           edhrec_data=edhrec_data,
+                           high_synergy=high_synergy,
+                           owned_suggestions=owned_suggestions,
+                           buy_suggestions=buy_suggestions,
+                           cut_candidates=cut_candidates,
+                           error=error,
+                           format_label=FORMAT_LABELS.get(deck['format'], deck['format']),
+                           cache_ttl_days=CACHE_TTL_DAYS)
+
+
+@decks_bp.route('/<int:deck_id>/suggestions/refresh', methods=['POST'])
+def suggestions_refresh(deck_id):
+    return redirect(url_for('decks.suggestions', deck_id=deck_id, refresh='1'))
+
+
+# ── Auto-fill ─────────────────────────────────────────────────────────────────
+
+@decks_bp.route('/<int:deck_id>/auto-fill')
+def auto_fill_preview(deck_id):
+    import json as _json
+    from app.auto_fill import auto_fill
+    from app.strategy import STRATEGIES, DEFAULT_STRATEGY
+
+    db = get_db()
+    deck = db.execute('SELECT * FROM decks WHERE id=?', [deck_id]).fetchone()
+    if not deck:
+        db.close()
+        abort(404)
+
+    # Resolve commander
+    cmd = db.execute(
+        "SELECT dc.name, dc.scryfall_id FROM deck_cards dc "
+        "WHERE dc.deck_id=? AND dc.board='commander' LIMIT 1", [deck_id]
+    ).fetchone()
+    if not cmd:
+        cmd = db.execute(
+            "SELECT dc.name, dc.scryfall_id FROM deck_cards dc "
+            "LEFT JOIN scryfall_bulk b ON dc.scryfall_id=b.scryfall_id "
+            "WHERE dc.deck_id=? AND b.type_line LIKE '%Legendary%Creature%' "
+            "ORDER BY b.cmc DESC, dc.name LIMIT 1", [deck_id]
+        ).fetchone()
+
+    if not cmd:
+        db.close()
+        return render_template('decks/auto_fill.html', deck=deck, error='No commander found.',
+                               result=None, strategies=STRATEGIES,
+                               strategy_key=deck['strategy'] or DEFAULT_STRATEGY,
+                               format_label=FORMAT_LABELS.get(deck['format'], deck['format']))
+
+    # Get commander colour identity
+    bulk = db.execute('SELECT color_identity FROM scryfall_bulk WHERE scryfall_id=? LIMIT 1',
+                      [cmd['scryfall_id']]).fetchone()
+    color_identity = bulk['color_identity'] if bulk else '[]'
+
+    strategy_key = request.args.get('strategy') or deck['strategy'] or DEFAULT_STRATEGY
+    if strategy_key not in STRATEGIES:
+        strategy_key = DEFAULT_STRATEGY
+
+    # Check EDHREC cache exists
+    from app.edhrec import _name_to_slug
+    slug = _name_to_slug(cmd['name'])
+    has_edhrec = bool(db.execute('SELECT 1 FROM edhrec_cache WHERE slug=?', [slug]).fetchone())
+
+    result = None
+    error = None
+    if not has_edhrec:
+        error = f"No EDHREC data cached for {cmd['name']}. Use ⟳ EDHREC on the deck page first."
+    else:
+        result = auto_fill(db, deck_id, cmd['name'], color_identity, strategy_key)
+
+    db.close()
+    return render_template('decks/auto_fill.html',
+                           deck=deck,
+                           commander=cmd,
+                           result=result,
+                           error=error,
+                           strategies=STRATEGIES,
+                           strategy_key=strategy_key,
+                           format_label=FORMAT_LABELS.get(deck['format'], deck['format']))
+
+
+@decks_bp.route('/<int:deck_id>/auto-fill/apply', methods=['POST'])
+def auto_fill_apply(deck_id):
+    import json as _json
+    from app.auto_fill import auto_fill
+    from app.strategy import STRATEGIES, DEFAULT_STRATEGY
+
+    db = get_db()
+    deck = db.execute('SELECT * FROM decks WHERE id=?', [deck_id]).fetchone()
+    if not deck:
+        db.close()
+        abort(404)
+
+    cmd = db.execute(
+        "SELECT dc.name, dc.scryfall_id FROM deck_cards dc "
+        "WHERE dc.deck_id=? AND dc.board='commander' LIMIT 1", [deck_id]
+    ).fetchone()
+    if not cmd:
+        db.close()
+        return jsonify(error='No commander found'), 400
+
+    bulk = db.execute('SELECT color_identity FROM scryfall_bulk WHERE scryfall_id=? LIMIT 1',
+                      [cmd['scryfall_id']]).fetchone()
+    color_identity = bulk['color_identity'] if bulk else '[]'
+
+    strategy_key = request.form.get('strategy') or deck['strategy'] or DEFAULT_STRATEGY
+    if strategy_key not in STRATEGIES:
+        strategy_key = DEFAULT_STRATEGY
+
+    result = auto_fill(db, deck_id, cmd['name'], color_identity, strategy_key)
+
+    added = 0
+    for card in result['picked'] + result['land_picks']:
+        sid = card.get('scryfall_id')
+        if not sid:
+            continue
+        count = card.get('count', 1)
+        existing = db.execute(
+            'SELECT id, count FROM deck_cards WHERE deck_id=? AND scryfall_id=? AND board=?',
+            [deck_id, sid, 'main']
+        ).fetchone()
+        if existing:
+            db.execute('UPDATE deck_cards SET count=count+? WHERE id=?', [count, existing['id']])
+        else:
+            db.execute(
+                'INSERT INTO deck_cards (deck_id, scryfall_id, name, count, board, added_at) VALUES (?,?,?,?,?,?)',
+                [deck_id, sid, card['name'], count, 'main', _now()]
+            )
+        added += count
+
+    db.commit()
+    db.close()
+    return redirect(url_for('decks.detail', deck_id=deck_id))
+
+
+# ── Combo detail (lazy-loaded) ────────────────────────────────────────────────
+
+@decks_bp.route('/<int:deck_id>/combo-detail/<path:combo_id>')
+def combo_detail(deck_id, combo_id):
+    from app.database import get_db
+    from app.edhrec import fetch_combo_detail
+    from flask import jsonify as _jsonify
+    db = get_db()
+    # Look up href from combo_cache
+    row = db.execute('SELECT combos_json FROM combo_cache WHERE slug IN (SELECT slug FROM combo_cache LIMIT 1)').fetchone()
+    href = None
+    if row:
+        import json as _j
+        for combo in _j.loads(row['combos_json']):
+            if combo['comboId'] == combo_id:
+                href = combo['href']
+                break
+    if not href:
+        db.close()
+        return _jsonify(error='not found'), 404
+    detail = fetch_combo_detail(db, combo_id, href)
+    db.close()
+    if not detail:
+        return _jsonify(error='fetch failed'), 502
+    return _jsonify(detail)

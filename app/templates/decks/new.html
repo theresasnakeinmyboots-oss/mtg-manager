@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}New Deck - MTG Manager{% endblock %}
+{% block title %}New Deck - TheJar{% endblock %}
 
 {% block content %}
 <div class="deck-form-page">
@@ -12,13 +12,24 @@
         </label>
         <label>
             Format
-            <select name="format" required>
+            <select name="format" id="formatSelect" required>
                 <option value="">Select format…</option>
                 {% for key, label in formats.items() %}
                 <option value="{{ key }}" {% if form.get('format') == key %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
         </label>
+        <div id="sealedCollectionRow" style="display:none;">
+            <label>
+                Autofill from collection <span style="font-weight:400;color:var(--text-secondary);">(optional)</span>
+                <select name="sealed_collection_id" id="sealedCollectionSelect">
+                    <option value="">— none, start empty —</option>
+                    {% for c in collections %}
+                    <option value="{{ c.id }}" {% if form.get('sealed_collection_id')|string == c.id|string %}selected{% endif %}>{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
         <label>
             Description <span style="font-weight:400;color:var(--text-secondary);">(optional)</span>
             <textarea name="description" rows="3">{{ form.get('description','') }}</textarea>
@@ -29,4 +40,13 @@
         </div>
     </form>
 </div>
+<script>
+const formatSelect = document.getElementById('formatSelect');
+const sealedRow = document.getElementById('sealedCollectionRow');
+function toggleSealedRow() {
+    sealedRow.style.display = formatSelect.value === 'sealed' ? '' : 'none';
+}
+formatSelect.addEventListener('change', toggleSealedRow);
+toggleSealedRow();
+</script>
 {% endblock %}

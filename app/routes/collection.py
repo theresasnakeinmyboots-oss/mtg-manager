@@ -290,6 +290,7 @@ def browse():
                COALESCE(k.set_code, '') as set_code,
                COALESCE(k.rarity, '') as rarity,
                COALESCE(k.cmc, 0) as cmc,
+               COALESCE(k.scryfall_id, '') as scryfall_id,
                SUM(c.count) as total_count
         FROM collection c
         LEFT JOIN cards k ON c.card_id = k.id
@@ -411,8 +412,12 @@ def cards_json():
     order_clause = 'ORDER BY ' + ', '.join(parts) if parts else 'ORDER BY c.name'
 
     cursor = db.execute(f'''
-        SELECT MIN(c.id) as id, c.name, c.edition, c.condition, SUM(c.count) as count, c.foil,
+        SELECT MIN(c.id) as id, c.name, c.edition, c.condition, SUM(c.count) as count, c.foil, c.card_number,
                COALESCE(k.image_uri_normal, '') as image_uri,
+               COALESCE(k.mana_cost, '') as mana_cost,
+               COALESCE(k.set_code, '') as set_code,
+               COALESCE(k.rarity, '') as rarity,
+               COALESCE(k.scryfall_id, '') as scryfall_id,
                SUM(c.count) as total_count
         FROM collection c
         LEFT JOIN cards k ON c.card_id = k.id
@@ -493,8 +498,21 @@ def card_detail(card_id):
         ''', (card['name'],))
         alternatives = [dict(r) for r in cursor.fetchall()]
 
+    # Decks containing this card (matched by name, same as deck-view ownership logic)
+    decks_with_card = []
+    if card['name']:
+        cursor = db.execute('''
+            SELECT d.id, d.name, d.format, dc.board, dc.count
+            FROM deck_cards dc
+            JOIN decks d ON d.id = dc.deck_id
+            WHERE LOWER(dc.name) = LOWER(?)
+            ORDER BY d.name
+        ''', (card['name'],))
+        decks_with_card = [dict(r) for r in cursor.fetchall()]
+
     db.close()
-    return render_template('collection/card_detail.html', card=card, alternatives=alternatives)
+    return render_template('collection/card_detail.html', card=card, alternatives=alternatives,
+                           decks_with_card=decks_with_card)
 
 @collection_bp.route('/collection/<int:row_id>/switch-printing', methods=['POST'])
 def switch_printing(row_id):

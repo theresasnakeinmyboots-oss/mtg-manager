@@ -1,0 +1,39 @@
+{% if card.legal_formats %}
+<div class="cd-section">
+    <span class="cd-label">Legal Formats</span>
+    <p class="cd-formats">{{ card.legal_formats|join(', ') }}</p>
+</div>
+{% endif %}
+
+{% if card.price_usd or card.price_usd_foil or card.price_eur %}
+<div class="cd-section">
+    <span class="cd-label">Market Prices</span>
+    <div class="cd-prices">
+        {% if card.foil and card.price_usd_foil %}
+        <div class="cd-price-row">
+            <span>USD (foil)</span>
+            <span class="cd-price-val">${{ "%.2f"|format(card.price_usd_foil) }}</span>
+        </div>
+        {% elif card.price_usd %}
+        <div class="cd-price-row">
+            <span>USD</span>
+            <span class="cd-price-val">${{ "%.2f"|format(card.price_usd) }}</span>
+        </div>
+        {% endif %}
+        {% if card.foil and card.price_eur_foil %}
+        <div class="cd-price-row">
+            <span>EUR (foil)</span>
+            <span class="cd-price-val">€{{ "%.2f"|format(card.price_eur_foil) }}</span>
+        </div>
+        {% elif card.price_eur %}
+        <div class="cd-price-row">
+            <span>EUR</span>
+            <span class="cd-price-val">€{{ "%.2f"|format(card.price_eur) }}</span>
+        </div>
+        {% endif %}
+    </div>
+    {% if card.prices_updated_at %}
+    <p class="cd-prices-updated">Updated {{ card.prices_updated_at[:10] }}</p>
+    {% endif %}
+</div>
+{% endif %}

@@ -1,27 +1,29 @@
 {% extends 'base.html' %}
-{% block title %}{{ deck.name }} - MTG Manager{% endblock %}
+{% block title %}{{ deck.name }} - TheJar{% endblock %}
 
 {% block content %}
 <div class="deck-detail-page">
 
-    <!-- Header -->
+    <!-- Header: name, format, count, validity, delete only -->
     <div class="deck-detail-header">
         <div class="deck-detail-title">
             <a href="/decks" class="deck-back">← Decks</a>
-            <h1>{{ deck.name }}</h1>
+            <h1 id="deckNameHeading" class="deck-name-editable" title="Click to rename">{{ deck.name }}</h1>
+            <input id="deckNameInput" class="deck-name-input" type="text" value="{{ deck.name | e }}" style="display:none;" maxlength="120">
             <span class="deck-format-badge">{{ format_label }}</span>
         </div>
         <div class="deck-detail-actions">
             <span class="deck-stat">{{ total_count }} cards · {{ owned_count }}/{{ total_count }} owned</span>
+            {% if printing_mismatch_count %}
+            <a href="/decks/{{ deck.id }}/reconcile" class="deck-stat deck-mismatch-badge" title="Cards owned under a different printing than the deck lists">
+                ⚠ {{ printing_mismatch_count }} printing mismatch{{ 'es' if printing_mismatch_count != 1 else '' }}
+            </a>
+            {% endif %}
             {% if errors %}
             <span class="deck-validity invalid" title="{{ errors | join(', ') }}">⚠ Invalid</span>
             {% else %}
             <span class="deck-validity valid">✓ Valid</span>
             {% endif %}
-            <div class="deck-view-toggle">
-                <button class="deck-view-btn active" id="btnListView" title="List view">☰ List</button>
-                <button class="deck-view-btn" id="btnCardView" title="Card view">⊞ Cards</button>
-            </div>
             <form method="POST" action="/decks/{{ deck.id }}/delete" style="display:inline;"
                   onsubmit="return confirm('Delete this deck?');">
                 <button type="submit" class="btn btn-danger btn-sm">Delete</button>
@@ -48,21 +50,12 @@
     <p class="deck-description">{{ deck.description }}</p>
     {% endif %}
 
-    <!-- Add card -->
-    <div class="deck-add-bar">
-        <div class="deck-add-search-wrap">
-            <input type="text" id="cardSearchInput" class="deck-add-input" placeholder="Add a card…" autocomplete="off">
-            <div id="cardSearchResults" class="deck-add-results" style="display:none;"></div>
-        </div>
-        <select id="cardSearchBoard" class="deck-add-board">
-            <option value="main">Main</option>
-            <option value="side">Side</option>
-            <option value="commander">Cmdr</option>
-        </select>
-        <button id="cardSearchBtn" class="btn btn-primary btn-sm" disabled>Add</button>
-    </div>
-
-    <!-- Stats charts -->
+    <!-- Collapsible stats block -->
+    <details class="deck-stats-collapsible" id="statsCollapsible">
+        <summary class="deck-stats-summary">
+            <span>Stats &amp; Health</span>
+            <span class="deck-stats-summary-chevron">▾</span>
+        </summary>
     <div class="deck-stats-panel">
         <div class="deck-stat-card">
             <div class="deck-stat-card-title">Mana Curve</div>
@@ -103,12 +96,27 @@
             </div>
         </div>
         {% endif %}
-        <div class="deck-stat-card">
-            <div class="deck-stat-card-title">Deck Health</div>
+        <div class="deck-stat-card deck-stat-card--health">
+            <div class="deck-stat-card-title">
+                Deck Health
+                {% if deck['format'] != 'sealed' %}
+                <span class="strategy-select-wrap">
+                    <select id="strategySelect" class="strategy-select" title="Set deck strategy to adjust health thresholds">
+                        {% for key, strat in strategies.items() %}
+                        <option value="{{ key }}" {% if key == strategy_key %}selected{% endif %}>{{ strat.label }}</option>
+                        {% endfor %}
+                    </select>
+                </span>
+                {% endif %}
+            </div>
             <div class="deck-stat-card-body">
+                {% if deck['format'] != 'sealed' %}
+                <p class="strategy-description" id="strategyDescription">{{ strategies[strategy_key].description }}</p>
+                {% endif %}
                 <table class="draw-prob-table">
                     {% for label, count, tag, tip in deck_health %}
-                    <tr title="{{ tip }}">
+                    {% if label not in muted_checks %}
+                    <tr class="health-row" data-health-label="{{ label }}" title="{{ tip }} — click to filter">
                         <td class="draw-prob-label">{{ label }}</td>
                         <td class="health-count health-{{ tag }}">{{ count }}</td>
                         <td class="health-indicator">
@@ -116,13 +124,109 @@
                                 {% if tag == 'ok' %}✓{% elif tag == 'warn' %}~{% else %}✗{% endif %}
                             </span>
                         </td>
-                        <td class="draw-prob-label" style="color:var(--text-muted);font-size:0.72rem;">{{ tip }}</td>
+                        <td class="draw-prob-label health-tip-cell" style="color:var(--text-muted);font-size:0.72rem;">{{ tip }}</td>
+                        <td class="health-mute-cell">
+                            <button class="health-mute-btn" data-check="{{ label }}" title="Hide this check">✕</button>
+                        </td>
                     </tr>
+                    {% endif %}
                     {% endfor %}
+                    {% if muted_checks %}
+                    <tr>
+                        <td colspan="5" style="padding-top:0.5rem;">
+                            <span class="health-muted-label">Muted: </span>
+                            {% for check in muted_checks %}
+                            <button class="health-unmute-btn" data-check="{{ check }}" title="Restore this check">{{ check }} ↩</button>
+                            {% endfor %}
+                        </td>
+                    </tr>
+                    {% endif %}
                 </table>
             </div>
         </div>
+
+        <!-- Strategy Detection (experimental) -->
+        <div class="deck-stat-card deck-stat-card--detection">
+            <div class="deck-stat-card-title">Strategy Detection <span class="deck-stat-badge-experimental">experimental</span></div>
+            <div class="deck-stat-card-body">
+                {% if strategy_detection %}
+                <div class="detection-result" id="detectionResult">
+                    <div class="detection-strategy">{{ strategies.get(strategy_detection.detected_strategy, {}).get('label', strategy_detection.detected_strategy) }}</div>
+                    <div class="detection-confidence-bar">
+                        <div class="detection-confidence-fill" style="width:{{ (strategy_detection.confidence * 100) | round(0) | int }}%"></div>
+                    </div>
+                    <div class="detection-confidence-pct">{{ (strategy_detection.confidence * 100) | round(0) | int }}% confidence</div>
+                    <ul class="detection-reasoning">
+                        {% for line in strategy_detection.reasoning.split('\n') if line.strip() %}
+                        <li>{{ line }}</li>
+                        {% endfor %}
+                    </ul>
+                    <div class="detection-rating" id="detectionRating">
+                        {% if strategy_detection.user_rating == 1 %}
+                        <span class="detection-rated-correct">👍 Marked correct</span>
+                        {% elif strategy_detection.user_rating == 0 %}
+                        <span class="detection-rated-wrong">👎 Marked wrong</span>
+                        {% else %}
+                        <span class="detection-rate-prompt">Was this accurate?</span>
+                        <button class="btn-detection-rate" data-rating="1">👍 Yes</button>
+                        <button class="btn-detection-rate" data-rating="0">👎 No</button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% else %}
+                <p class="detection-none" id="detectionNone">No detection run yet.</p>
+                {% endif %}
+                <button class="btn btn-secondary btn-sm detection-run-btn" id="detectBtn">⟳ Detect strategy</button>
+            </div>
+        </div>
     </div>
+    </details>
+
+    <!-- Deck toolbar: add card, suggestions toggle, view toggle, EDHREC refresh -->
+    <div class="deck-toolbar">
+        <div class="deck-add-search-wrap">
+            <input type="text" id="cardSearchInput" class="deck-add-input" placeholder="Add a card…" autocomplete="off">
+            <div id="cardSearchResults" class="deck-add-results" style="display:none;"></div>
+        </div>
+        <select id="cardSearchBoard" class="deck-add-board">
+            <option value="main">Main</option>
+            <option value="side">Side</option>
+            <option value="commander">Cmdr</option>
+        </select>
+        <button id="cardSearchBtn" class="btn btn-primary btn-sm" disabled>Add</button>
+        <div class="deck-toolbar-sep"></div>
+        {% if deck.format == 'commander' %}
+        <button class="btn btn-secondary btn-sm" id="btnToggleSugg" title="Show/hide inline suggestions">✦ Suggestions</button>
+        <a href="/decks/{{ deck.id }}/auto-fill" class="btn btn-secondary btn-sm" title="Auto-fill deck from owned cards">⚙ Auto-fill</a>
+        {% if active_commander %}
+        <button class="btn btn-secondary btn-sm" id="btnEdhrecRefresh" title="Refresh EDHREC data for {{ active_commander.name }}">⟳ EDHREC</button>
+        {% endif %}
+        {% endif %}
+        <div class="deck-view-toggle">
+            <button class="deck-view-btn active" id="btnListView" title="List view">☰ List</button>
+            <button class="deck-view-btn" id="btnCardView" title="Card view">⊞ Cards</button>
+        </div>
+    </div>
+
+    <!-- Commander picker (commander format only) -->
+    {% if deck.format == 'commander' and eligible_commanders %}
+    <div class="commander-picker">
+        <span class="commander-picker-label">Commander:</span>
+        <div class="commander-picker-options">
+            {% for c in eligible_commanders %}
+            <button class="commander-option {% if active_commander and c.scryfall_id == active_commander.scryfall_id %}active{% endif %}"
+                    data-sid="{{ c.scryfall_id }}"
+                    {% if c.image_uri_normal %}data-img="{{ c.image_uri_normal }}"{% endif %}
+                    title="{{ c.name }}">
+                {% if c.image_uri_normal %}
+                <img src="{{ c.image_uri_normal }}" alt="{{ c.name }}">
+                {% endif %}
+                <span>{{ c.name }}</span>
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Active filter banner -->
     <div id="filterBanner" style="display:none;" class="deck-filter-banner">
@@ -152,9 +256,69 @@
                 {% for card in cards %}
                 {% include 'decks/_card_row.html' %}
                 {% endfor %}
+                {% if sugg_by_type and type_name in sugg_by_type %}
+                {% for s in sugg_by_type[type_name] %}
+                <div class="deck-sugg-row"
+                     data-scryfall-id="{{ s.scryfall_id }}"
+                     data-card-name="{{ s.name | e }}"
+                     data-colors="{{ s.colors }}"
+                     data-type="{{ s.type_line | e }}"
+                     data-tags="{{ s.tags | join(',') | e }}"
+                     data-sugg-index="{{ loop.index0 }}"
+                     {% if s.image_uri_normal %}data-img="{{ s.image_uri_normal }}"{% endif %}>
+                    <div class="deck-row-left">
+                        <span class="deck-sugg-name">{{ s.name }}</span>
+                        {% if s.owned %}
+                        <span class="deck-sugg-badge deck-sugg-owned" title="You own this card">✓ owned</span>
+                        {% else %}
+                        <span class="deck-sugg-badge deck-sugg-buy" title="Not in your collection">$ buy</span>
+                        {% endif %}
+                        {% if s.synergy is not none %}<span class="deck-sugg-synergy">⚡{{ '%+.0f%%' | format(s.synergy * 100) }}</span>{% endif %}
+                        {% for tag in s.tags %}<span class="deck-sugg-tag">{{ tag }}</span>{% endfor %}
+                    </div>
+                    <div class="deck-row-right">
+                        {% if s.price_usd %}<span class="deck-sugg-price">${{ '%.2f' | format(s.price_usd | float) }}</span>{% endif %}
+                        {% if s.mana_cost %}
+                        <span class="deck-row-mana">{{ s.mana_cost | format_mana_cost | safe }}</span>
+                        {% endif %}
+                        <button class="deck-sugg-add-btn" data-sid="{{ s.scryfall_id }}" title="Add to deck">+ Add</button>
+                    </div>
+                </div>
+                {% endfor %}
+                {% endif %}
             </div>
         </div>
         {% endfor %}
+        {% if sugg_by_type and 'Other' in sugg_by_type and 'Other' not in (main_groups | map(attribute=0) | list) %}
+        <div class="deck-type-group">
+            <h3 class="deck-type-heading">Other <span class="deck-type-count">suggestions</span></h3>
+            <div class="deck-card-list">
+                {% for s in sugg_by_type['Other'] %}
+                <div class="deck-sugg-row"
+                     data-scryfall-id="{{ s.scryfall_id }}"
+                     data-card-name="{{ s.name | e }}"
+                     data-colors="{{ s.colors }}"
+                     data-type="{{ s.type_line | e }}"
+                     data-tags="{{ s.tags | join(',') | e }}"
+                     data-sugg-index="{{ loop.index0 }}"
+                     {% if s.image_uri_normal %}data-img="{{ s.image_uri_normal }}"{% endif %}>
+                    <div class="deck-row-left">
+                        <span class="deck-sugg-name">{{ s.name }}</span>
+                        {% if s.owned %}
+                        <span class="deck-sugg-badge deck-sugg-owned">✓ owned</span>
+                        {% else %}
+                        <span class="deck-sugg-badge deck-sugg-buy">$ buy</span>
+                        {% endif %}
+                    </div>
+                    <div class="deck-row-right">
+                        {% if s.price_usd %}<span class="deck-sugg-price">${{ '%.2f' | format(s.price_usd | float) }}</span>{% endif %}
+                        <button class="deck-sugg-add-btn" data-sid="{{ s.scryfall_id }}">+ Add</button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
         {% if not main_groups %}
         <p class="empty-state-inline">No cards in mainboard yet.</p>
         {% endif %}
@@ -191,12 +355,12 @@
                      data-colors="{{ card.colors or '[]' }}"
                      data-type="{{ card.type_line or '' | e }}"
                      title="{{ card.name }}">
-                    <div class="card-thumb-inner">
+                    <a class="card-thumb-inner" href="{% if card.collection_row_id %}/collection/{{ card.collection_row_id }}{% else %}/card/{{ card.scryfall_id }}{% endif %}">
                         <img src="{{ card.image_uri_normal }}" alt="{{ card.name }}" loading="lazy">
                         <div class="card-shine"></div>
                         <div class="card-glare"></div>
                         {% if card.count > 1 %}<div class="thumb-count">×{{ card.count }}</div>{% endif %}
-                    </div>
+                    </a>
                 </div>
                 {% endif %}
                 {% endfor %}
@@ -216,12 +380,12 @@
                      data-colors="{{ card.colors or '[]' }}"
                      data-type="{{ card.type_line or '' | e }}"
                      title="{{ card.name }}">
-                    <div class="card-thumb-inner">
+                    <a class="card-thumb-inner" href="{% if card.collection_row_id %}/collection/{{ card.collection_row_id }}{% else %}/card/{{ card.scryfall_id }}{% endif %}">
                         <img src="{{ card.image_uri_normal }}" alt="{{ card.name }}" loading="lazy">
                         <div class="card-shine"></div>
                         <div class="card-glare"></div>
                         {% if card.count > 1 %}<div class="thumb-count">×{{ card.count }}</div>{% endif %}
-                    </div>
+                    </a>
                 </div>
                 {% endif %}
                 {% endfor %}
@@ -242,12 +406,12 @@
                      data-colors="{{ card.colors or '[]' }}"
                      data-type="{{ card.type_line or '' | e }}"
                      title="{{ card.name }}">
-                    <div class="card-thumb-inner">
+                    <a class="card-thumb-inner" href="{% if card.collection_row_id %}/collection/{{ card.collection_row_id }}{% else %}/card/{{ card.scryfall_id }}{% endif %}">
                         <img src="{{ card.image_uri_normal }}" alt="{{ card.name }}" loading="lazy">
                         <div class="card-shine"></div>
                         <div class="card-glare"></div>
                         {% if card.count > 1 %}<div class="thumb-count">×{{ card.count }}</div>{% endif %}
-                    </div>
+                    </a>
                 </div>
                 {% endif %}
                 {% endfor %}
@@ -256,6 +420,123 @@
         {% endfor %}
         {% endif %}
     </div>
+
+    <!-- Cut candidates -->
+    {% if cut_candidates %}
+    <section class="deck-section" id="cutCandidates">
+        <h2 class="deck-section-heading">Cut Candidates <span class="deck-section-count">{{ cut_candidates | length }}</span></h2>
+        <p class="deck-section-subhead">Cards with the weakest synergy + utility score — consider swapping these out</p>
+        <div class="cut-table">
+            <div class="cut-table-head">
+                <span>Card</span>
+                <span>Type</span>
+                <span>EDHREC Synergy</span>
+                <span>Utility</span>
+                <span>Keep Score</span>
+            </div>
+            {% for c in cut_candidates %}
+            <div class="cut-row sugg-card"
+                 data-scryfall-id="{{ c.scryfall_id }}"
+                 {% if c.image_uri_normal %}data-img="{{ c.image_uri_normal }}"{% endif %}>
+                <span class="cut-name">{{ c.name }}</span>
+                <span class="cut-type">{{ (c.type_line or '').split('—')[0].strip() }}</span>
+                <span class="cut-synergy {% if c.synergy is none %}cut-unknown{% elif c.synergy < -0.05 %}cut-bad{% elif c.synergy < 0.1 %}cut-med{% else %}cut-ok{% endif %}">
+                    {% if c.synergy is none %}<span title="Not in EDHREC data for this commander">—</span>
+                    {% else %}{{ '%+.0f%%' | format(c.synergy * 100) }}{% endif %}
+                </span>
+                <span class="cut-health">
+                    {% set hp = (c.health_score * 100) | int %}
+                    <span class="cut-health-bar"><span class="cut-health-fill" style="width:{{ hp }}%"></span></span>
+                    <span class="cut-health-label {% if hp == 0 %}cut-bad{% elif hp < 50 %}cut-med{% else %}cut-ok{% endif %}">
+                        {% if hp == 0 %}none{% elif hp < 50 %}low{% else %}ok{% endif %}
+                    </span>
+                </span>
+                <span class="cut-keep-score">
+                    {% set pct = (c.keep_score * 100) | int %}
+                    <span class="cut-score-bar">
+                        <span class="cut-score-fill {% if pct < 35 %}cut-score-bad{% elif pct < 55 %}cut-score-med{% else %}cut-score-ok{% endif %}"
+                              style="width:{{ pct }}%"></span>
+                    </span>
+                    <span class="cut-score-num {% if pct < 35 %}cut-bad{% elif pct < 55 %}cut-med{% else %}cut-ok{% endif %}">{{ pct }}%</span>
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if combos_complete or combos_near_miss %}
+    <section class="combo-section">
+        <h2 class="deck-section-heading">
+            Combos
+            {% if combos_complete %}<span class="combo-count-badge combo-badge-complete">{{ combos_complete | length }} complete</span>{% endif %}
+            {% if combos_near_miss %}<span class="combo-count-badge combo-badge-near">{{ combos_near_miss | length }} near miss</span>{% endif %}
+        </h2>
+
+        {% macro combo_pieces(combo, is_near) %}
+        <div class="combo-pieces">
+            {% for card in combo.cards %}
+            {% set is_missing = is_near and card.name in combo.missing %}
+            {% set is_owned   = is_near and card.name in combo.missing_owned %}
+            <span class="combo-piece {% if is_missing %}combo-piece-missing{% else %}combo-piece-have{% endif %}"
+                  {% if card.image_uri %}data-combo-img="{{ card.image_uri }}"{% endif %}>
+                {{ card.name }}
+                {% if is_missing %}
+                <span class="combo-missing-tag {% if is_owned %}combo-missing-owned{% endif %}">
+                    {% if is_owned %}owned{% else %}missing{% endif %}
+                </span>
+                {% endif %}
+            </span>
+            {% if not loop.last %}<span class="combo-plus">+</span>{% endif %}
+            {% endfor %}
+        </div>
+        {% endmacro %}
+
+        {% macro combo_meta(combo, is_near) %}
+        <div class="combo-meta">
+            <span class="combo-results">{{ combo.results | join(' · ') }}</span>
+            <span class="combo-decks">{{ '{:,}'.format(combo.count) }} decks</span>
+            {% if combo.bracket %}<span class="combo-bracket">bracket {{ combo.bracket }}</span>{% endif %}
+            <button class="combo-expand-btn" data-combo-id="{{ combo.comboId }}" title="Show steps &amp; prerequisites">▸ How?</button>
+            {% if is_near %}
+            {% for missing_name in combo.missing %}
+            <button class="combo-add-btn deck-sugg-add-btn"
+                    data-name="{{ missing_name | e }}"
+                    data-sid="{{ combo.cards | selectattr('name', 'equalto', missing_name) | map(attribute='scryfall_id') | first | default('') }}">
+                + Add {{ missing_name }}
+            </button>
+            {% endfor %}
+            {% endif %}
+        </div>
+        <div class="combo-detail" id="combo-detail-{{ combo.comboId }}" style="display:none;"></div>
+        {% endmacro %}
+
+        {% if combos_complete %}
+        <div class="combo-subsection">
+            <h3 class="combo-subheading">In your deck</h3>
+            {% for combo in combos_complete %}
+            <div class="combo-row combo-row-complete">
+                {{ combo_pieces(combo, false) }}
+                {{ combo_meta(combo, false) }}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if combos_near_miss %}
+        <div class="combo-subsection">
+            <h3 class="combo-subheading">Near misses <span class="combo-subheading-note">(missing 1–2 cards)</span></h3>
+            {% for combo in combos_near_miss %}
+            <div class="combo-row combo-row-near">
+                {{ combo_pieces(combo, true) }}
+                {{ combo_meta(combo, true) }}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+    </section>
+    {% endif %}
 
 </div>
 
@@ -273,6 +554,8 @@ const colorData      = {{ chart_colors      | safe }};
 const typesData      = {{ chart_types       | safe }};
 const manaSrcData    = {{ chart_mana_src    | safe }};
 const manaSrcIds     = {{ chart_mana_src_ids | safe }};
+const healthSids     = {{ chart_health_sids | safe }};
+const suggLimit      = {{ sugg_per_type_limit }};
 
 // ── Card filter engine ────────────────────────────────────────────
 let activeFilter = null;
@@ -288,6 +571,7 @@ function applyFilter(filter) {
         document.querySelectorAll('.card-thumb[data-scryfall-id]').forEach(t => t.style.display = '');
         document.querySelectorAll('.deck-type-group').forEach(g => g.style.display = '');
         banner.style.display = 'none';
+        applySuggFilter();
         return;
     }
 
@@ -305,6 +589,8 @@ function applyFilter(filter) {
         } else if (filter.kind === 'type') {
             return type.includes(filter.typeName) ||
                    (filter.typeName === 'Other' && !['Creature','Instant','Sorcery','Enchantment','Artifact','Planeswalker','Land'].some(t => type.includes(t)));
+        } else if (filter.kind === 'health') {
+            return (healthSids[filter.label] || []).includes(sid);
         }
         return false;
     }
@@ -314,18 +600,33 @@ function applyFilter(filter) {
         thumb.style.display = cardMatches(thumb) ? '' : 'none';
     });
 
-    // Hide type-group sections that are entirely empty after filtering
+    // Update suggestions to match filter, then hide type-groups with nothing visible
+    applySuggFilter();
+
     document.querySelectorAll('.deck-type-group').forEach(g => {
         const visibleRow   = Array.from(g.querySelectorAll('.deck-card-row')).some(r => r.style.display !== 'none');
+        const visibleSugg  = Array.from(g.querySelectorAll('.deck-sugg-row')).some(r => r.style.display !== 'none');
         const visibleThumb = Array.from(g.querySelectorAll('.card-thumb')).some(r => r.style.display !== 'none');
-        g.style.display = (visibleRow || visibleThumb) ? '' : 'none';
+        g.style.display = (visibleRow || visibleSugg || visibleThumb) ? '' : 'none';
     });
 
-    label.textContent = filter.label;
+    label.textContent = filter.displayLabel || filter.label;
     banner.style.display = 'flex';
 }
 
 document.getElementById('filterClear').addEventListener('click', () => applyFilter(null));
+
+// ── Deck health click-to-filter ───────────────────────────────────
+document.querySelectorAll('.health-row').forEach(row => {
+    row.addEventListener('click', () => {
+        const label = row.dataset.healthLabel;
+        if (activeFilter && activeFilter.kind === 'health' && activeFilter.label === label) {
+            applyFilter(null);
+        } else {
+            applyFilter({ kind: 'health', label, displayLabel: `Health: ${label}` });
+        }
+    });
+});
 
 // Mana curve — vertical bar chart
 new Chart(document.getElementById('chartCurve'), {
@@ -418,13 +719,14 @@ const colorsChart = new Chart(document.getElementById('chartColors'), {
             }
         },
         plugins: {
-            legend: { position: 'right', labels: { boxWidth: 12, padding: 8,
+            legend: { position: 'right', labels: { boxWidth: 12, padding: 8, color: '#cbd5e1',
                 generateLabels(chart) {
                     return visibleColors.map(name => ({
                         text: name,
                         fillStyle: (colorPalette[name] || '#94a3b8') +
                             (visibleOuter.includes(name) && !visibleInner.includes(name) ? '99' : ''),
                         strokeStyle: '#1e293b',
+                        fontColor: '#cbd5e1',
                         lineWidth: 1,
                         hidden: false,
                     }));
@@ -622,28 +924,326 @@ document.querySelectorAll('.deck-row-remove').forEach(btn => {
     });
 })();
 
+// ── EDHREC refresh ───────────────────────────────────────────────
+(function () {
+    const btn = document.getElementById('btnEdhrecRefresh');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = '⟳ Fetching…';
+        const res = await fetch(`/admin/edhrec-refresh/{{ deck.id }}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+            location.reload();
+        } else {
+            btn.disabled = false;
+            btn.textContent = '⟳ EDHREC';
+            alert(data.error || 'Refresh failed');
+        }
+    });
+})();
+
+// ── Commander picker ──────────────────────────────────────────────
+(function () {
+    document.querySelectorAll('.commander-option').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const sid = btn.dataset.sid;
+            const res = await fetch(`/decks/{{ deck.id }}/set-commander`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scryfall_id: sid }),
+            });
+            const data = await res.json();
+            if (data.ok) {
+                location.reload();
+            }
+        });
+    });
+})();
+
 // ── Hover zoom ────────────────────────────────────────────────────
 (function () {
     const zoom = document.getElementById('cardZoom');
     let hideTimer = null;
 
     document.addEventListener('mouseover', e => {
-        const row = e.target.closest('.deck-card-row[data-img]');
-        if (!row || !row.dataset.img) return;
+        const target = e.target.closest('.deck-card-row[data-img], .deck-sugg-row[data-img]');
+        if (!target || !target.dataset.img) return;
         clearTimeout(hideTimer);
-        zoom.innerHTML = `<img src="${row.dataset.img}" style="width:200px;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.7);">`;
+        zoom.innerHTML = `<img src="${target.dataset.img}" style="width:300px;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.7);">`;
         zoom.style.display = 'block';
-        const r = row.getBoundingClientRect();
+        const r = target.getBoundingClientRect();
         let left = r.right + 12, top = r.top;
-        if (left + 210 > window.innerWidth - 8) left = r.left - 222;
-        if (top + 280 > window.innerHeight - 8) top = window.innerHeight - 288;
+        if (left + 312 > window.innerWidth - 8) left = r.left - 314;
+        if (top + 420 > window.innerHeight - 8) top = window.innerHeight - 428;
         if (top < 8) top = 8;
         zoom.style.left = left + 'px';
         zoom.style.top  = top  + 'px';
     });
 
     document.addEventListener('mouseout', e => {
-        if (!e.target.closest('.deck-card-row')) return;
+        if (!e.target.closest('.deck-card-row, .deck-sugg-row')) return;
+        hideTimer = setTimeout(() => { zoom.style.display = 'none'; }, 80);
+    });
+})();
+
+// ── Strategy dropdown ─────────────────────────────────────────────
+(function () {
+    const strategyDescriptions = {
+        {% for key, strat in strategies.items() %}
+        '{{ key }}': '{{ strat.description | replace("'", "\\'") }}',
+        {% endfor %}
+    };
+    const sel = document.getElementById('strategySelect');
+    const desc = document.getElementById('strategyDescription');
+    if (!sel) return;
+    sel.addEventListener('change', async () => {
+        const strategy = sel.value;
+        if (desc) desc.textContent = strategyDescriptions[strategy] || '';
+        const res = await fetch('/decks/{{ deck.id }}/set-strategy', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({strategy}),
+        });
+        const data = await res.json();
+        if (data.ok) location.reload();
+    });
+})();
+
+// ── Suggestions show/hide toggle ─────────────────────────────────
+let suggVisible = false;
+
+function applySuggFilter() {
+    // Each .deck-sugg-row has data-sugg-index (position within its type bucket)
+    // and data-tags (comma-separated role tags).
+    // Rules:
+    //   - If suggestions are hidden: hide all
+    //   - If a health filter is active: show only rows matching the tag, no cap
+    //   - Otherwise: show only rows with index < suggLimit
+    document.querySelectorAll('.deck-sugg-row').forEach(row => {
+        if (!suggVisible) { row.style.display = 'none'; return; }
+        const idx  = parseInt(row.dataset.suggIndex || '0', 10);
+        const tags = (row.dataset.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+        if (activeFilter && activeFilter.kind === 'health') {
+            row.style.display = tags.includes(activeFilter.label) ? '' : 'none';
+        } else {
+            row.style.display = idx < suggLimit ? '' : 'none';
+        }
+    });
+
+    // Hide type-group sections that have no visible suggestion rows and no visible card rows
+    document.querySelectorAll('.deck-type-group').forEach(g => {
+        const visibleCard = Array.from(g.querySelectorAll('.deck-card-row')).some(r => r.style.display !== 'none');
+        const visibleSugg = Array.from(g.querySelectorAll('.deck-sugg-row')).some(r => r.style.display !== 'none');
+        const visibleThumb = Array.from(g.querySelectorAll('.card-thumb')).some(r => r.style.display !== 'none');
+        if (activeFilter) {
+            g.style.display = (visibleCard || visibleSugg || visibleThumb) ? '' : 'none';
+        }
+    });
+}
+
+(function () {
+    const btn = document.getElementById('btnToggleSugg');
+    if (!btn) return;
+    // Hide all suggestion rows initially
+    document.querySelectorAll('.deck-sugg-row').forEach(r => r.style.display = 'none');
+    btn.addEventListener('click', () => {
+        suggVisible = !suggVisible;
+        btn.classList.toggle('active', suggVisible);
+        applySuggFilter();
+    });
+})();
+
+// ── Health mute / unmute ──────────────────────────────────────────
+document.querySelectorAll('.health-mute-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const check = btn.dataset.check;
+        await fetch('/decks/{{ deck.id }}/mute-check', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({check_name: check}),
+        });
+        location.reload();
+    });
+});
+
+document.querySelectorAll('.health-unmute-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const check = btn.dataset.check;
+        await fetch('/decks/{{ deck.id }}/unmute-check', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({check_name: check}),
+        });
+        location.reload();
+    });
+});
+
+// ── Strategy detection ────────────────────────────────────────────
+(function () {
+    const detectBtn = document.getElementById('detectBtn');
+    if (!detectBtn) return;
+    detectBtn.addEventListener('click', async () => {
+        detectBtn.disabled = true;
+        detectBtn.textContent = '⟳ Detecting…';
+        const res = await fetch('/decks/{{ deck.id }}/detect-strategy', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: '{}',
+        });
+        if (res.ok) location.reload();
+        else {
+            detectBtn.disabled = false;
+            detectBtn.textContent = '⟳ Detect strategy';
+        }
+    });
+
+    document.querySelectorAll('.btn-detection-rate').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const rating = parseInt(btn.dataset.rating);
+            const res = await fetch('/decks/{{ deck.id }}/rate-detection', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({rating}),
+            });
+            if (res.ok) location.reload();
+        });
+    });
+})();
+
+// ── Suggestion row add buttons ────────────────────────────────────
+document.querySelectorAll('.deck-sugg-add-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const sid  = btn.dataset.sid;
+        const name = btn.dataset.name;
+        const origText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '…';
+
+        let payload = {board: 'main', count: 1};
+        if (sid) {
+            payload.scryfall_id = sid;
+        } else if (name) {
+            // Resolve name → scryfall_id via search endpoint
+            const sr = await fetch(`/search-card?q=${encodeURIComponent(name)}&limit=1`);
+            const sd = await sr.json();
+            const hit = (sd.results || [])[0];
+            if (hit) payload.scryfall_id = hit.scryfall_id;
+            else { btn.disabled = false; btn.textContent = origText; return; }
+        }
+
+        const res = await fetch('/decks/{{ deck.id }}/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.ok) {
+            location.reload();
+        } else {
+            btn.disabled = false;
+            btn.textContent = origText;
+        }
+    });
+});
+// ── Inline deck rename ───────────────────────────────────────────
+(function () {
+    const heading = document.getElementById('deckNameHeading');
+    const input   = document.getElementById('deckNameInput');
+    if (!heading || !input) return;
+
+    function startEdit() {
+        input.value = heading.textContent.trim();
+        heading.style.display = 'none';
+        input.style.display   = '';
+        input.focus();
+        input.select();
+    }
+
+    async function commitEdit() {
+        const name = input.value.trim();
+        input.style.display   = 'none';
+        heading.style.display = '';
+        if (!name || name === heading.textContent.trim()) return;
+        const res = await fetch('/decks/{{ deck.id }}/rename', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name}),
+        });
+        const data = await res.json();
+        if (data.ok) {
+            heading.textContent = data.name;
+            document.title = data.name + ' - TheJar';
+        }
+    }
+
+    heading.addEventListener('click', startEdit);
+    input.addEventListener('blur', commitEdit);
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { input.value = heading.textContent.trim(); input.blur(); }
+    });
+})();
+
+// ── Combo expand buttons ─────────────────────────────────────────
+const _comboDetailCache = {};
+document.querySelectorAll('.combo-expand-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const comboId  = btn.dataset.comboId;
+        const detailEl = document.getElementById(`combo-detail-${comboId}`);
+        if (!detailEl) return;
+        const isVisible = getComputedStyle(detailEl).display !== 'none';
+        if (isVisible) {
+            detailEl.style.display = 'none';
+            btn.textContent = '▸ How?';
+            return;
+        }
+        btn.textContent = '…';
+        if (!_comboDetailCache[comboId]) {
+            const res = await fetch(`/decks/{{ deck.id }}/combo-detail/${comboId}`);
+            _comboDetailCache[comboId] = res.ok ? await res.json() : null;
+        }
+        const d = _comboDetailCache[comboId];
+        if (!d) { btn.textContent = '▸ How?'; return; }
+
+        let html = '';
+        if (d.prerequisites && d.prerequisites.length) {
+            html += '<div class="combo-detail-section"><span class="combo-detail-label">Prerequisites</span><ul class="combo-detail-list">';
+            d.prerequisites.forEach(p => { html += `<li>${p}</li>`; });
+            html += '</ul></div>';
+        }
+        if (d.steps && d.steps.length) {
+            html += '<div class="combo-detail-section"><span class="combo-detail-label">Steps</span><ol class="combo-detail-list">';
+            d.steps.forEach(s => { html += `<li>${s}</li>`; });
+            html += '</ol></div>';
+        }
+        detailEl.innerHTML = html;
+        detailEl.style.display = 'flex';
+        btn.textContent = '▾ How?';
+    });
+});
+
+// ── Combo card hover zoom ────────────────────────────────────────
+(function () {
+    const zoom = document.getElementById('cardZoom');
+    let hideTimer = null;
+    document.addEventListener('mouseover', e => {
+        const piece = e.target.closest('.combo-piece[data-combo-img]');
+        if (!piece) return;
+        clearTimeout(hideTimer);
+        zoom.innerHTML = `<img src="${piece.dataset.comboImg}" style="width:300px;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.7);">`;
+        zoom.style.display = 'block';
+        const r = piece.getBoundingClientRect();
+        let left = r.right + 12, top = r.top;
+        if (left + 312 > window.innerWidth - 8) left = r.left - 314;
+        if (top + 420 > window.innerHeight - 8) top = window.innerHeight - 428;
+        if (top < 8) top = 8;
+        zoom.style.left = left + 'px';
+        zoom.style.top  = top  + 'px';
+    });
+    document.addEventListener('mouseout', e => {
+        if (!e.target.closest('.combo-piece')) return;
         hideTimer = setTimeout(() => { zoom.style.display = 'none'; }, 80);
     });
 })();

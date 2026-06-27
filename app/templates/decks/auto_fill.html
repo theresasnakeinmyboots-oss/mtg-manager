@@ -1,0 +1,191 @@
+{% extends 'base.html' %}
+{% block title %}Auto-fill — {{ deck.name }} - TheJar{% endblock %}
+
+{% block content %}
+<div class="deck-detail-page">
+
+    <div class="deck-detail-header">
+        <div class="deck-detail-title">
+            <a href="/decks/{{ deck.id }}" class="deck-back">← {{ deck.name }}</a>
+            <h1>Auto-fill</h1>
+            <span class="deck-format-badge">{{ format_label }}</span>
+        </div>
+        {% if commander %}
+        <div class="deck-detail-actions">
+            <span class="deck-stat">Commander: {{ commander.name }}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Strategy selector -->
+    <form method="GET" action="/decks/{{ deck.id }}/auto-fill" class="autofill-strategy-form">
+        <label class="autofill-strategy-label">Strategy:</label>
+        <select name="strategy" class="strategy-select" onchange="this.form.submit()">
+            {% for key, strat in strategies.items() %}
+            <option value="{{ key }}" {% if key == strategy_key %}selected{% endif %}>{{ strat.label }}</option>
+            {% endfor %}
+        </select>
+        <span class="autofill-strategy-desc">{{ strategies[strategy_key].description }}</span>
+    </form>
+
+    {% if error %}
+    <div class="deck-errors">
+        <div class="deck-error-item">⚠ {{ error }}</div>
+    </div>
+
+    {% elif result %}
+
+    <!-- Stats summary -->
+    <div class="autofill-summary">
+        <div class="autofill-stat">
+            <span class="autofill-stat-val">{{ result.stats.non_land_picked }}</span>
+            <span class="autofill-stat-label">non-lands</span>
+        </div>
+        <div class="autofill-stat">
+            <span class="autofill-stat-val">{{ result.stats.land_picked }}</span>
+            <span class="autofill-stat-label">lands</span>
+        </div>
+        <div class="autofill-stat">
+            <span class="autofill-stat-val">{{ result.stats.total_picked }}</span>
+            <span class="autofill-stat-label">total cards</span>
+        </div>
+        <div class="autofill-stat">
+            <span class="autofill-stat-val">{{ result.stats.from_edhrec }}</span>
+            <span class="autofill-stat-label">from EDHREC</span>
+        </div>
+        <div class="autofill-stat">
+            <span class="autofill-stat-val">{{ result.stats.owned_pool_size }}</span>
+            <span class="autofill-stat-label">owned candidates</span>
+        </div>
+    </div>
+
+    <!-- Category quota fill -->
+    <div class="autofill-quotas">
+        {% for cat, filled in result.slots_filled.items() %}
+        {% set target = strategies[strategy_key].health_checks.get(cat, {}).get('ok', 0) %}
+        <div class="autofill-quota">
+            <span class="autofill-quota-label">{{ cat }}</span>
+            <div class="autofill-quota-bar-track">
+                <div class="autofill-quota-bar-fill {% if filled >= target %}autofill-ok{% elif filled >= target // 2 %}autofill-warn{% else %}autofill-low{% endif %}"
+                     style="width:{{ [[(filled / target * 100) | int, 100] | min, 0] | max }}%"></div>
+            </div>
+            <span class="autofill-quota-num {% if filled >= target %}autofill-ok{% elif filled >= target // 2 %}autofill-warn{% else %}autofill-low{% endif %}">
+                {{ filled }}/{{ target }}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Apply form -->
+    <form method="POST" action="/decks/{{ deck.id }}/auto-fill/apply" id="applyForm">
+        <input type="hidden" name="strategy" value="{{ strategy_key }}">
+        <div class="autofill-apply-bar">
+            <button type="submit" class="btn btn-primary btn-sm"
+                    onclick="return confirm('Add {{ result.stats.total_picked }} cards to {{ deck.name }}?')">
+                ✚ Add all {{ result.stats.total_picked }} cards to deck
+            </button>
+            <a href="/decks/{{ deck.id }}" class="btn btn-secondary btn-sm">Cancel</a>
+        </div>
+    </form>
+
+    <!-- Non-land picks -->
+    {% if result.picked %}
+    <section class="autofill-section">
+        <h2 class="autofill-section-heading">
+            Non-lands
+            <span class="deck-section-count">{{ result.picked | length }}</span>
+        </h2>
+        <div class="cut-table">
+            <div class="autofill-table-head">
+                <span>Card</span>
+                <span>Type</span>
+                <span>Roles</span>
+                <span>EDHREC Synergy</span>
+                <span>Price</span>
+            </div>
+            {% for c in result.picked %}
+            <div class="autofill-row"
+                 {% if c.image_uri_normal %}data-img="{{ c.image_uri_normal }}"{% endif %}>
+                <span class="cut-name">
+                    {{ c.name }}
+                    {% if not c.in_edhrec %}<span class="autofill-tag autofill-tag-filler">filler</span>{% endif %}
+                </span>
+                <span class="cut-type">{{ (c.type_line or '').split('—')[0].strip() }}</span>
+                <span class="autofill-cats">
+                    {% for cat in c.cats | sort %}
+                    <span class="deck-sugg-tag">{{ cat }}</span>
+                    {% endfor %}
+                </span>
+                <span class="cut-synergy {% if c.synergy is none %}cut-unknown{% elif c.synergy < -0.05 %}cut-bad{% elif c.synergy < 0.1 %}cut-med{% else %}cut-ok{% endif %}">
+                    {% if c.synergy is none %}—{% else %}{{ '%+.0f%%' | format(c.synergy * 100) }}{% endif %}
+                </span>
+                <span class="deck-sugg-price">{% if c.price_usd %}${{ '%.2f' | format(c.price_usd | float) }}{% else %}—{% endif %}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Land picks -->
+    {% if result.land_picks %}
+    <section class="autofill-section">
+        <h2 class="autofill-section-heading">
+            Lands
+            <span class="deck-section-count">{{ result.land_picks | sum(attribute='count') }}</span>
+        </h2>
+        <div class="cut-table">
+            <div class="autofill-table-head">
+                <span>Card</span>
+                <span>Type</span>
+                <span>Count</span>
+                <span>Owned</span>
+                <span>Price</span>
+            </div>
+            {% for c in result.land_picks %}
+            <div class="autofill-row"
+                 {% if c.image_uri_normal %}data-img="{{ c.image_uri_normal }}"{% endif %}>
+                <span class="cut-name">
+                    {{ c.name }}
+                    {% if c.get('is_basic') %}<span class="autofill-tag autofill-tag-basic">basic</span>{% endif %}
+                </span>
+                <span class="cut-type">{{ (c.type_line or '').split('—')[0].strip() }}</span>
+                <span>{{ c.count }}</span>
+                <span class="autofill-owned">{{ c.owned_count }}</span>
+                <span class="deck-sugg-price">{% if c.price_usd %}${{ '%.2f' | format(c.price_usd | float) }}{% else %}—{% endif %}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% endif %}
+
+</div>
+
+<div id="cardZoom" style="display:none;position:fixed;z-index:9000;pointer-events:none;"></div>
+
+<script>
+(function () {
+    const zoom = document.getElementById('cardZoom');
+    let hideTimer = null;
+    document.addEventListener('mouseover', e => {
+        const target = e.target.closest('.autofill-row[data-img]');
+        if (!target) return;
+        clearTimeout(hideTimer);
+        zoom.innerHTML = `<img src="${target.dataset.img}" style="width:300px;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.7);">`;
+        zoom.style.display = 'block';
+        const r = target.getBoundingClientRect();
+        let left = r.right + 12, top = r.top;
+        if (left + 312 > window.innerWidth - 8) left = r.left - 314;
+        if (top + 420 > window.innerHeight - 8) top = window.innerHeight - 428;
+        if (top < 8) top = 8;
+        zoom.style.left = left + 'px';
+        zoom.style.top  = top  + 'px';
+    });
+    document.addEventListener('mouseout', e => {
+        if (!e.target.closest('.autofill-row')) return;
+        hideTimer = setTimeout(() => { zoom.style.display = 'none'; }, 80);
+    });
+})();
+</script>
+{% endblock %}

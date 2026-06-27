@@ -1,0 +1,194 @@
+{% extends 'base.html' %}
+{% block title %}Suggestions — {{ deck.name }} - TheJar{% endblock %}
+
+{% block content %}
+<div class="deck-detail-page">
+
+    <div class="deck-detail-header">
+        <div class="deck-detail-title">
+            <a href="/decks/{{ deck.id }}" class="deck-back">← {{ deck.name }}</a>
+            <h1>Suggestions</h1>
+            <span class="deck-format-badge">{{ format_label }}</span>
+        </div>
+        <div class="deck-detail-actions">
+            {% if edhrec_data %}
+            <span class="deck-stat" style="font-size:0.8rem;">
+                EDHREC: {{ edhrec_data.num_decks | default(0) }} decks ·
+                cached {{ edhrec_data.fetched_at[:10] }} ·
+                refreshes every {{ cache_ttl_days }} days
+            </span>
+            <form method="POST" action="/decks/{{ deck.id }}/suggestions/refresh" style="display:inline;">
+                <button type="submit" class="btn btn-secondary btn-sm">↺ Refresh</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if error %}
+    <div class="deck-errors">
+        <div class="deck-error-item">⚠ {{ error }}</div>
+    </div>
+    {% endif %}
+
+    {% if not commander %}
+    <div class="empty-state">
+        <p>This deck has no commander. Add a card to the Commander board to get EDHREC suggestions.</p>
+    </div>
+
+    {% elif edhrec_data %}
+
+    <!-- High synergy -->
+    {% if high_synergy %}
+    <section class="sugg-section">
+        <h2 class="sugg-heading">
+            High Synergy
+            <span class="sugg-subhead">Cards EDHREC considers unusually strong with {{ commander.name }}</span>
+        </h2>
+        <div class="sugg-grid">
+            {% for card in high_synergy %}
+            {% include 'decks/_suggestion_card.html' %}
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Owned suggestions -->
+    {% if owned_suggestions %}
+    <section class="sugg-section">
+        <h2 class="sugg-heading">
+            In Your Collection
+            <span class="sugg-subhead">Cards you own that EDHREC recommends for this commander</span>
+        </h2>
+        <div class="sugg-grid">
+            {% for card in owned_suggestions %}
+            {% include 'decks/_suggestion_card.html' %}
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Cards to buy -->
+    {% if buy_suggestions %}
+    <section class="sugg-section">
+        <h2 class="sugg-heading">
+            Consider Buying
+            <span class="sugg-subhead">Top EDHREC recommendations not currently in your collection</span>
+        </h2>
+        <div class="sugg-grid">
+            {% for card in buy_suggestions %}
+            {% include 'decks/_suggestion_card.html' %}
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Cut candidates -->
+    {% if cut_candidates %}
+    <section class="sugg-section" id="cuts">
+        <h2 class="sugg-heading">
+            Cut Candidates
+            <span class="sugg-subhead">Cards in your deck with the weakest synergy + utility score — consider swapping these out</span>
+        </h2>
+        <div class="cut-table">
+            <div class="cut-table-head">
+                <span>Card</span>
+                <span>Type</span>
+                <span>EDHREC Synergy</span>
+                <span>Utility</span>
+                <span>Keep Score</span>
+            </div>
+            {% for c in cut_candidates %}
+            <div class="cut-row sugg-card"
+                 data-scryfall-id="{{ c.scryfall_id }}"
+                 data-card-name="{{ c.name | e }}"
+                 {% if c.image_uri_normal %}data-img="{{ c.image_uri_normal }}"{% endif %}>
+                <span class="cut-name">
+                    {{ c.name }}
+                    <span class="cut-board-tag">{{ c.board }}</span>
+                </span>
+                <span class="cut-type">{{ (c.type_line or '').split('—')[0].strip() }}</span>
+                <span class="cut-synergy {% if c.synergy is none %}cut-unknown{% elif c.synergy < -0.05 %}cut-bad{% elif c.synergy < 0.1 %}cut-med{% else %}cut-ok{% endif %}">
+                    {% if c.synergy is none %}
+                    <span title="Not found in EDHREC data for this commander">—</span>
+                    {% else %}
+                    {{ '%+.0f%%' | format(c.synergy * 100) }}
+                    {% endif %}
+                </span>
+                <span class="cut-health">
+                    {% set hp = (c.health_score * 100) | int %}
+                    <span class="cut-health-bar">
+                        <span class="cut-health-fill" style="width:{{ hp }}%"></span>
+                    </span>
+                    <span class="cut-health-label {% if hp == 0 %}cut-bad{% elif hp < 50 %}cut-med{% else %}cut-ok{% endif %}">
+                        {% if hp == 0 %}none{% elif hp < 50 %}low{% else %}ok{% endif %}
+                    </span>
+                </span>
+                <span class="cut-keep-score">
+                    {% set pct = (c.keep_score * 100) | int %}
+                    <span class="cut-score-bar">
+                        <span class="cut-score-fill {% if pct < 35 %}cut-score-bad{% elif pct < 55 %}cut-score-med{% else %}cut-score-ok{% endif %}"
+                              style="width:{{ pct }}%"></span>
+                    </span>
+                    <span class="cut-score-num {% if pct < 35 %}cut-bad{% elif pct < 55 %}cut-med{% else %}cut-ok{% endif %}">{{ pct }}%</span>
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% endif %}
+
+</div>
+
+<div id="cardZoom" style="display:none;position:fixed;z-index:9000;pointer-events:none;"></div>
+
+<script>
+// Hover zoom
+(function () {
+    const zoom = document.getElementById('cardZoom');
+    let hideTimer = null;
+    document.addEventListener('mouseover', e => {
+        const card = e.target.closest('.sugg-card[data-img]');
+        if (!card) return;
+        clearTimeout(hideTimer);
+        zoom.innerHTML = `<img src="${card.dataset.img}" style="width:330px;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.7);">`;
+        zoom.style.display = 'block';
+        const r = card.getBoundingClientRect();
+        let left = r.right + 12, top = r.top;
+        if (left + 342 > window.innerWidth - 8) left = r.left - 344;
+        if (top + 462 > window.innerHeight - 8) top = window.innerHeight - 470;
+        if (top < 8) top = 8;
+        zoom.style.left = left + 'px';
+        zoom.style.top  = top  + 'px';
+    });
+    document.addEventListener('mouseout', e => {
+        if (!e.target.closest('.sugg-card')) return;
+        hideTimer = setTimeout(() => { zoom.style.display = 'none'; }, 80);
+    });
+})();
+
+// Add to deck buttons
+document.querySelectorAll('.sugg-add-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const sid   = btn.dataset.sid;
+        const board = btn.closest('.sugg-card').querySelector('.sugg-board-select').value;
+        btn.disabled = true;
+        btn.textContent = '…';
+        const res  = await fetch('/decks/{{ deck.id }}/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({scryfall_id: sid, board, count: 1}),
+        });
+        const data = await res.json();
+        if (data.ok) {
+            btn.textContent = '✓ Added';
+            btn.classList.add('sugg-added');
+        } else {
+            btn.disabled = false;
+            btn.textContent = 'Add';
+        }
+    });
+});
+</script>
+{% endblock %}

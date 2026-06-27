@@ -1,0 +1,141 @@
+{% extends 'base.html' %}
+
+{% block title %}Reconcile Printings — {{ deck.name }} - TheJar{% endblock %}
+
+{% block content %}
+<div class="reconcile-page">
+    <a href="/decks/{{ deck.id }}" class="btn btn-secondary btn-sm back-btn">← Back to {{ deck.name }}</a>
+
+    <h1>Reconcile Printings</h1>
+    <p class="reconcile-intro">
+        These cards appear in the deck under a printing you don't own, but you own a
+        different printing of the same card. For each one, decide whether the deck list
+        is using the wrong printing, or your collection has the wrong printing recorded.
+    </p>
+
+    {% if not mismatches %}
+    <div class="empty-state"><p>No mismatches — every card in this deck either matches an owned printing exactly, or isn't owned at all.</p></div>
+    {% else %}
+    <div class="reconcile-list">
+        {% for m in mismatches %}
+        <div class="reconcile-row" data-deck-card-id="{{ m.deck_card.id }}">
+            <div class="reconcile-card-name">{{ m.deck_card.name }}</div>
+
+            <div class="reconcile-options">
+                <div class="reconcile-option reconcile-option-deck">
+                    <div class="reconcile-option-label">Deck list has</div>
+                    <div class="reconcile-thumb">
+                        {% if m.deck_card.image_uri_normal %}
+                        <img src="{{ m.deck_card.image_uri_normal }}" alt="{{ m.deck_card.name }}">
+                        {% else %}
+                        <div class="no-image-thumb">{{ m.deck_card.name }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="reconcile-meta">{{ m.deck_card.set_name }} #{{ m.deck_card.collector_number }}</div>
+                </div>
+
+                <div class="reconcile-divider">vs</div>
+
+                <div class="reconcile-option-group">
+                    <div class="reconcile-option-label">You own</div>
+                    {% for p in m.owned_printings %}
+                    <div class="reconcile-option reconcile-option-owned">
+                        <div class="reconcile-thumb">
+                            {% if p.image_uri_normal %}
+                            <img src="{{ p.image_uri_normal }}" alt="{{ m.deck_card.name }}">
+                            {% else %}
+                            <div class="no-image-thumb">{{ m.deck_card.name }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="reconcile-meta">
+                            {{ p.set_name }} #{{ p.collector_number }} · ×{{ p.count }}
+                            {% if p.foil %}<span class="cd-badge cd-badge-foil">Foil</span>{% endif %}
+                        </div>
+                        <div class="reconcile-option-actions">
+                            <button class="btn btn-secondary btn-sm reconcile-use-collection-btn"
+                                    data-deck-card-id="{{ m.deck_card.id }}"
+                                    data-scryfall-id="{{ p.scryfall_id }}">
+                                Use this in deck
+                            </button>
+                            <button class="btn btn-primary btn-sm reconcile-use-deck-btn"
+                                    data-deck-card-id="{{ m.deck_card.id }}"
+                                    data-collection-row-id="{{ p.collection_row_id }}">
+                                Fix this in collection
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<script>
+document.querySelectorAll('.reconcile-use-deck-btn').forEach(btn => {
+    const originalText = btn.textContent;
+    btn.addEventListener('click', async () => {
+        const row = btn.closest('.reconcile-row');
+        const deckCardId = btn.dataset.deckCardId;
+        const collectionRowId = btn.dataset.collectionRowId;
+        btn.disabled = true;
+        btn.textContent = 'Updating…';
+        try {
+            const res = await fetch(`/decks/{{ deck.id }}/reconcile/use-deck-printing`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deck_card_id: deckCardId, collection_row_id: collectionRowId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                row.style.opacity = '0.4';
+                row.style.pointerEvents = 'none';
+                btn.textContent = '✓ Updated';
+            } else {
+                btn.disabled = false;
+                btn.textContent = originalText;
+                alert(data.error);
+            }
+        } catch (err) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+            alert(err.message);
+        }
+    });
+});
+
+document.querySelectorAll('.reconcile-use-collection-btn').forEach(btn => {
+    const originalText = btn.textContent;
+    btn.addEventListener('click', async () => {
+        const row = btn.closest('.reconcile-row');
+        const deckCardId = btn.dataset.deckCardId;
+        const scryfallId = btn.dataset.scryfallId;
+        btn.disabled = true;
+        btn.textContent = 'Updating…';
+        try {
+            const res = await fetch(`/decks/{{ deck.id }}/reconcile/use-collection-printing`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deck_card_id: deckCardId, scryfall_id: scryfallId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                row.style.opacity = '0.4';
+                row.style.pointerEvents = 'none';
+                btn.textContent = '✓ Updated';
+            } else {
+                btn.disabled = false;
+                btn.textContent = originalText;
+                alert(data.error);
+            }
+        } catch (err) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+            alert(err.message);
+        }
+    });
+});
+</script>
+{% endblock %}

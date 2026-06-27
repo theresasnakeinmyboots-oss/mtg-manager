@@ -1,0 +1,20 @@
+{% if card.image_uri %}
+{% set is_dfc = '/front/' in card.image_uri %}
+{% set back_uri = card.image_uri.replace('/front/', '/back/') if is_dfc else '' %}
+<div class="card-thumb card-detail-thumb"
+     data-foil="{{ '1' if card.foil else '0' }}"
+     data-mythic="{{ '1' if card.rarity == 'mythic' else '0' }}"
+     data-holo="{{ '1' if card.rarity in ('rare',) and not card.foil else '0' }}">
+    <div class="card-thumb-inner">
+        <div class="card-flip-container{% if is_dfc %} is-dfc{% endif %}"
+             {% if is_dfc %}data-front="{{ card.image_uri }}" data-back="{{ back_uri }}"{% endif %}>
+            <img class="card-detail-img" id="cardFaceImg" src="{{ card.image_uri }}" alt="{{ card.name }}">
+            {% if is_dfc %}<div class="card-flip-hint">Click to flip</div>{% endif %}
+        </div>
+        <div class="card-shine"></div>
+        <div class="card-glare"></div>
+    </div>
+</div>
+{% else %}
+<div class="no-image-large">No Image Available</div>
+{% endif %}

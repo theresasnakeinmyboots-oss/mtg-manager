@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Admin - MTG Manager{% endblock %}
+{% block title %}Admin - TheJar{% endblock %}
 
 {% block content %}
 <div class="admin-page">
@@ -9,29 +9,86 @@
     <div class="admin-section">
         <h2 class="admin-section-title">Delver Lens APK Database</h2>
         <p class="admin-section-desc">
-            The <code>data.db</code> file is extracted from the Delver Lens Android APK and maps
-            internal card IDs to Scryfall UUIDs. Upload it once — it only needs replacing when
-            Delver Lens releases a new card database.
+            Maps Delver Lens internal card IDs to Scryfall UUIDs. Required for <code>.dlens</code> imports.
+            Downloads the official APK (~240 MB) and extracts the database automatically.
         </p>
 
         <div class="admin-status">
             {% if datadb_exists %}
             <span class="admin-status-ok">✓ data.db present</span>
-            <span class="admin-status-meta">{{ datadb_size_kb }} KB · uploaded {{ datadb_mtime }}</span>
+            <span class="admin-status-meta" id="datadbMeta">{{ datadb_size_kb }} KB · {{ datadb_mtime }}</span>
             {% else %}
-            <span class="admin-status-missing">✗ data.db not uploaded yet — .dlens imports will fail until this is provided</span>
+            <span class="admin-status-missing">✗ data.db not present — .dlens imports will fail</span>
             {% endif %}
         </div>
 
-        <form id="datadbForm" style="margin-top:1rem;">
-            <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
-                <input type="file" name="file" accept=".db" required id="datadbFile">
-                <button type="submit" class="btn btn-primary btn-sm" id="datadbBtn">
-                    {% if datadb_exists %}Replace data.db{% else %}Upload data.db{% endif %}
-                </button>
+        <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; margin-top:1rem;">
+            <button class="btn btn-primary btn-sm" id="fetchDatadbBtn"
+                    {% if datadb_fetch_running %}disabled{% endif %}>
+                {% if datadb_fetch_running %}Downloading…{% elif datadb_exists %}↓ Re-download from APK{% else %}↓ Download from APK{% endif %}
+            </button>
+            <span style="color:var(--text-muted);font-size:0.8rem;">or</span>
+            <label class="btn btn-secondary btn-sm" style="cursor:pointer;">
+                Upload data.db manually
+                <input type="file" name="file" accept=".db" id="datadbFile" style="display:none;">
+            </label>
+        </div>
+
+        <pre id="fetchDatadbLog" style="margin-top:0.75rem; max-height:160px; overflow-y:auto; font-size:0.78rem; background:var(--bg-card); border:1px solid var(--border); padding:0.75rem; border-radius:6px; white-space:pre-wrap; {% if not datadb_fetch_log %}display:none;{% endif %}">{{ datadb_fetch_log }}</pre>
+        <div id="datadbStatus" style="margin-top:0.5rem;"></div>
+    </div>
+
+    <div class="admin-section">
+        <h2 class="admin-section-title">Settings</h2>
+        <div class="admin-settings-grid">
+            <div class="admin-setting-row">
+                <label class="admin-setting-label" for="suggPerType">Suggestions per card type</label>
+                <div class="admin-setting-control">
+                    <input type="number" id="suggPerType" class="admin-setting-input"
+                           value="{{ suggestions_per_type }}" min="1" max="50">
+                    <button class="btn btn-primary btn-sm" id="saveSettingsBtn">Save</button>
+                    <span id="settingsSaveStatus"></span>
+                </div>
+                <p class="admin-setting-desc">How many EDHREC suggestions to show per card type in the deck view inline panel. The full suggestions page uses this × 6.</p>
             </div>
-        </form>
-        <div id="datadbStatus" style="margin-top:0.75rem;"></div>
+        </div>
+    </div>
+
+    <div class="admin-section">
+        <h2 class="admin-section-title">EDHREC Cache</h2>
+        <p class="admin-section-desc">
+            EDHREC suggestion data is cached per commander for {{ cache_ttl_days }} days.
+            Refresh a deck's cache manually if you want fresh data sooner.
+        </p>
+        {% if commander_decks %}
+        <table class="admin-edhrec-table">
+            <thead>
+                <tr>
+                    <th>Deck</th>
+                    <th>Commander</th>
+                    <th>Cached</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in commander_decks %}
+                <tr id="edhrec-row-{{ d.id }}">
+                    <td><a href="/decks/{{ d.id }}">{{ d.name }}</a></td>
+                    <td>{{ d.commander or '—' }}</td>
+                    <td class="edhrec-cached-at">{{ d.cached_at or 'not cached' }}</td>
+                    <td>
+                        {% if d.commander %}
+                        <button class="btn btn-secondary btn-xs edhrec-refresh-btn"
+                                data-deck-id="{{ d.id }}">⟳ Refresh</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:var(--text-muted);font-size:0.85rem;">No commander decks found.</p>
+        {% endif %}
     </div>
 
     <div class="admin-section">
@@ -57,37 +114,116 @@
 </div>
 
 <script>
-document.getElementById('datadbForm').addEventListener('submit', async e => {
-    e.preventDefault();
-    const btn = document.getElementById('datadbBtn');
-    const status = document.getElementById('datadbStatus');
-    const file = document.getElementById('datadbFile').files[0];
-    if (!file) return;
-
+// Settings save
+document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('saveSettingsBtn');
+    const status = document.getElementById('settingsSaveStatus');
+    const val = document.getElementById('suggPerType').value;
     btn.disabled = true;
-    btn.textContent = 'Uploading…';
-    status.innerHTML = '';
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-        const res = await fetch('/admin/upload-datadb', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data.success) {
-            status.innerHTML = `<span style="color:var(--success)">✓ Uploaded successfully (${data.size_kb} KB). Reloading…</span>`;
-            setTimeout(() => location.reload(), 1200);
-        } else {
-            status.innerHTML = `<span style="color:var(--danger)">✗ ${data.error}</span>`;
-            btn.disabled = false;
-            btn.textContent = 'Upload data.db';
-        }
-    } catch (err) {
-        status.innerHTML = `<span style="color:var(--danger)">✗ ${err.message}</span>`;
-        btn.disabled = false;
-        btn.textContent = 'Upload data.db';
+    const form = new FormData();
+    form.append('suggestions_per_type', val);
+    const res = await fetch('/admin/settings', { method: 'POST', body: form });
+    const data = await res.json();
+    btn.disabled = false;
+    if (data.ok) {
+        status.innerHTML = '<span style="color:var(--success)">✓ Saved</span>';
+        setTimeout(() => { status.innerHTML = ''; }, 2000);
+    } else {
+        status.innerHTML = '<span style="color:var(--danger)">✗ Error</span>';
     }
 });
+
+// EDHREC refresh buttons
+document.querySelectorAll('.edhrec-refresh-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const deckId = btn.dataset.deckId;
+        btn.disabled = true;
+        btn.textContent = '…';
+        const res = await fetch(`/admin/edhrec-refresh/${deckId}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+            const row = document.getElementById(`edhrec-row-${deckId}`);
+            row.querySelector('.edhrec-cached-at').textContent = new Date().toISOString().slice(0,10);
+            btn.textContent = '✓ Done';
+        } else {
+            btn.disabled = false;
+            btn.textContent = '⟳ Refresh';
+            alert(data.error || 'Refresh failed');
+        }
+    });
+});
+
+// Auto-fetch data.db from APK
+const fetchDatadbBtn = document.getElementById('fetchDatadbBtn');
+const fetchDatadbLog = document.getElementById('fetchDatadbLog');
+const datadbStatus   = document.getElementById('datadbStatus');
+let fetchPollInterval = null;
+
+async function pollFetchLog() {
+    try {
+        const res  = await fetch('/admin/fetch-datadb-log');
+        const data = await res.json();
+        fetchDatadbLog.style.display = '';
+        fetchDatadbLog.textContent = data.log;
+        fetchDatadbLog.scrollTop = fetchDatadbLog.scrollHeight;
+        if (!data.running) {
+            clearInterval(fetchPollInterval);
+            fetchPollInterval = null;
+            fetchDatadbBtn.disabled = false;
+            if (data.log.includes('Done.')) {
+                fetchDatadbBtn.textContent = '↓ Re-download from APK';
+                datadbStatus.innerHTML = `<span style="color:var(--success)">✓ data.db updated (${data.size_kb} KB). Reload to confirm.</span>`;
+                const meta = document.getElementById('datadbMeta');
+                if (meta) meta.textContent = `${data.size_kb} KB`;
+            } else {
+                fetchDatadbBtn.textContent = '↓ Download from APK';
+                datadbStatus.innerHTML = `<span style="color:var(--danger)">✗ Fetch failed — see log above</span>`;
+            }
+        }
+    } catch (e) { /* ignore */ }
+}
+
+fetchDatadbBtn.addEventListener('click', async () => {
+    fetchDatadbBtn.disabled = true;
+    fetchDatadbBtn.textContent = 'Downloading…';
+    datadbStatus.innerHTML = '';
+    fetchDatadbLog.style.display = '';
+    fetchDatadbLog.textContent = 'Starting…';
+    const res = await fetch('/admin/fetch-datadb', { method: 'POST' });
+    const data = await res.json();
+    if (data.started) {
+        fetchPollInterval = setInterval(pollFetchLog, 2000);
+    } else {
+        datadbStatus.innerHTML = `<span style="color:var(--danger)">✗ ${data.error}</span>`;
+        fetchDatadbBtn.disabled = false;
+        fetchDatadbBtn.textContent = '↓ Download from APK';
+    }
+});
+
+// Manual upload
+document.getElementById('datadbFile').addEventListener('change', async function () {
+    const file = this.files[0];
+    if (!file) return;
+    datadbStatus.innerHTML = 'Uploading…';
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        const res  = await fetch('/admin/upload-datadb', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.success) {
+            datadbStatus.innerHTML = `<span style="color:var(--success)">✓ Uploaded (${data.size_kb} KB). Reloading…</span>`;
+            setTimeout(() => location.reload(), 1200);
+        } else {
+            datadbStatus.innerHTML = `<span style="color:var(--danger)">✗ ${data.error}</span>`;
+        }
+    } catch (err) {
+        datadbStatus.innerHTML = `<span style="color:var(--danger)">✗ ${err.message}</span>`;
+    }
+});
+
+{% if datadb_fetch_running %}
+fetchPollInterval = setInterval(pollFetchLog, 2000);
+{% endif %}
 
 // Bulk sync
 const bulkBtn = document.getElementById('bulkSyncBtn');

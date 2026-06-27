@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ card.name }} - MTG Manager{% endblock %}
+{% block title %}{{ card.name }} - TheJar{% endblock %}
 
 {% block content %}
 <div class="card-detail-page">
@@ -10,119 +10,18 @@
 
         <!-- Left: card image -->
         <div class="card-detail-left">
-            {% if card.image_uri %}
-            {% set is_dfc = '/front/' in card.image_uri %}
-            {% set back_uri = card.image_uri.replace('/front/', '/back/') if is_dfc else '' %}
-            <div class="card-thumb card-detail-thumb"
-                 data-foil="{{ '1' if card.foil else '0' }}"
-                 data-mythic="{{ '1' if card.rarity == 'mythic' else '0' }}"
-                 data-holo="{{ '1' if card.rarity in ('rare',) and not card.foil else '0' }}">
-                <div class="card-thumb-inner">
-                    <div class="card-flip-container{% if is_dfc %} is-dfc{% endif %}"
-                         {% if is_dfc %}data-front="{{ card.image_uri }}" data-back="{{ back_uri }}"{% endif %}>
-                        <img class="card-detail-img" id="cardFaceImg" src="{{ card.image_uri }}" alt="{{ card.name }}">
-                        {% if is_dfc %}<div class="card-flip-hint">Click to flip</div>{% endif %}
-                    </div>
-                    <div class="card-shine"></div>
-                    <div class="card-glare"></div>
-                </div>
-            </div>
-            {% else %}
-            <div class="no-image-large">No Image Available</div>
-            {% endif %}
+            {% include 'cards/_card_image.html' %}
         </div>
 
         <!-- Centre: card info -->
         <div class="card-detail-centre">
-
-            <div class="cd-field">
-                <span class="cd-label">Card Name</span>
-                <span class="cd-value cd-name">{{ card.name }}</span>
-            </div>
-
-            {% if card.mana_cost %}
-            <div class="cd-field">
-                <span class="cd-label">Mana Cost</span>
-                <span class="cd-value mana-symbols">{{ card.mana_cost|format_mana_cost|safe }}</span>
-            </div>
-            {% endif %}
-
-            <div class="cd-field cd-field-split">
-                <div>
-                    <span class="cd-label">Type</span>
-                    <span class="cd-value cd-type">{{ card.type_line }}</span>
-                </div>
-                <div>
-                    <span class="cd-label">Rarity</span>
-                    <span class="cd-value">{{ card.rarity|title if card.rarity else '—' }}</span>
-                </div>
-            </div>
-
-            <hr class="cd-divider">
-
-            {% if card.oracle_text %}
-            <div class="cd-field">
-                <span class="cd-label">Rules Text</span>
-                <div class="cd-value cd-rules">
-                    {% for line in card.oracle_text.split('\n') %}
-                    <p>{{ line|format_oracle_text|safe }}</p>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-            {% if card.flavor_text %}
-            <div class="cd-field">
-                <span class="cd-label">Flavor Text</span>
-                <p class="cd-value cd-flavor">{{ card.flavor_text|format_oracle_text|safe }}</p>
-            </div>
-            {% endif %}
-
-            <hr class="cd-divider">
-
-            <div class="cd-field cd-field-split">
-                <div>
-                    <span class="cd-label">Artist</span>
-                    <span class="cd-value cd-highlight">{{ card.artist or '—' }}</span>
-                </div>
-                {% if card.power and card.toughness %}
-                <div>
-                    <span class="cd-label">P/T</span>
-                    <span class="cd-value cd-highlight">{{ card.power }}/{{ card.toughness }}</span>
-                </div>
-                {% endif %}
-            </div>
-
-            <div class="cd-field cd-field-split">
-                <div>
-                    <span class="cd-label">Set</span>
-                    <span class="cd-value cd-highlight">
-                        {% if card.set_code %}{{ card.set_code|format_set_symbol(card.rarity)|safe }} {% endif %}
-                        {{ card.set_name or card.edition }}
-                    </span>
-                </div>
-                <div>
-                    <span class="cd-label">Number</span>
-                    <span class="cd-value">{{ card.card_number or '—' }}</span>
-                </div>
-            </div>
-
-            <div class="cd-field">
-                <span class="cd-label">Language</span>
-                <span class="cd-value">{{ card.language or 'English' }}</span>
-            </div>
-
+            {% include 'cards/_card_info.html' %}
         </div>
 
         <!-- Right: collection info + legalities -->
         <div class="card-detail-right">
 
-            {% if card.legal_formats %}
-            <div class="cd-section">
-                <span class="cd-label">Legal Formats</span>
-                <p class="cd-formats">{{ card.legal_formats|join(', ') }}</p>
-            </div>
-            {% endif %}
+            {% include 'cards/_card_market.html' %}
 
             <div class="cd-section">
                 <span class="cd-label">In Your Collection</span>
@@ -153,38 +52,7 @@
                 {% endif %}
             </div>
 
-            {% if card.price_usd or card.price_usd_foil or card.price_eur %}
-            <div class="cd-section">
-                <span class="cd-label">Market Prices</span>
-                <div class="cd-prices">
-                    {% if card.foil and card.price_usd_foil %}
-                    <div class="cd-price-row">
-                        <span>USD (foil)</span>
-                        <span class="cd-price-val">${{ "%.2f"|format(card.price_usd_foil) }}</span>
-                    </div>
-                    {% elif card.price_usd %}
-                    <div class="cd-price-row">
-                        <span>USD</span>
-                        <span class="cd-price-val">${{ "%.2f"|format(card.price_usd) }}</span>
-                    </div>
-                    {% endif %}
-                    {% if card.foil and card.price_eur_foil %}
-                    <div class="cd-price-row">
-                        <span>EUR (foil)</span>
-                        <span class="cd-price-val">€{{ "%.2f"|format(card.price_eur_foil) }}</span>
-                    </div>
-                    {% elif card.price_eur %}
-                    <div class="cd-price-row">
-                        <span>EUR</span>
-                        <span class="cd-price-val">€{{ "%.2f"|format(card.price_eur) }}</span>
-                    </div>
-                    {% endif %}
-                </div>
-                {% if card.prices_updated_at %}
-                <p class="cd-prices-updated">Updated {{ card.prices_updated_at[:10] }}</p>
-                {% endif %}
-            </div>
-            {% endif %}
+            {% include 'cards/_card_decks.html' %}
 
             <div class="cd-section">
                 <button id="enrichCardBtn" class="btn btn-secondary btn-sm">{% if card.scryfall_id %}Refresh Card Data{% else %}Enrich Card Data{% endif %}</button>
@@ -195,34 +63,8 @@
     </div>
 </div>
 
-{% if alternatives %}
-<div class="alt-printings">
-    <div class="alt-printings-header">
-        <h3 class="alt-printings-title">Other Printings <span class="alt-count" id="altCount">({{ alternatives|length }})</span></h3>
-        <input type="text" id="altFilter" class="alt-filter-input" placeholder="Filter by set…" autocomplete="off">
-    </div>
-    <div class="alt-carousel">
-        {% for alt in alternatives %}
-        <div class="alt-thumb {% if alt.scryfall_id == card.scryfall_id %}alt-current{% endif %}"
-             data-scryfall-id="{{ alt.scryfall_id }}"
-             data-set-name="{{ alt.set_name|lower }}"
-             title="{{ alt.set_name }} #{{ alt.collector_number }}">
-            {% if alt.image_uri_normal %}
-            <img src="{{ alt.image_uri_normal }}" alt="{{ card.name }} — {{ alt.set_name }}" loading="lazy">
-            {% else %}
-            <div class="alt-no-image">{{ alt.set_code }}</div>
-            {% endif %}
-            <div class="alt-label">{{ alt.set_name }} #{{ alt.collector_number }}</div>
-            {% if alt.scryfall_id != card.scryfall_id %}
-            <button class="alt-switch-btn btn btn-primary btn-sm" data-scryfall-id="{{ alt.scryfall_id }}">Use this</button>
-            {% else %}
-            <div class="alt-current-label">Current</div>
-            {% endif %}
-        </div>
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
+{% set can_switch = true %}
+{% include 'cards/_printings_carousel.html' %}
 
 <script>
 const enrichCardBtn = document.getElementById('enrichCardBtn');
@@ -252,7 +94,7 @@ if (enrichCardBtn) {
     });
 }
 
-document.querySelectorAll('.alt-switch-btn').forEach(btn => {
+document.querySelectorAll('.alt-switch-btn[data-scryfall-id]').forEach(btn => {
     btn.addEventListener('click', async () => {
         const scryfallId = btn.dataset.scryfallId;
         const rowId = {{ card.collection_row_id }};
@@ -279,51 +121,6 @@ document.querySelectorAll('.alt-switch-btn').forEach(btn => {
         }
     });
 });
-
-// Alt printings filter
-const altFilter = document.getElementById('altFilter');
-if (altFilter) {
-    const allThumbs = Array.from(document.querySelectorAll('.alt-thumb'));
-    const altCount = document.getElementById('altCount');
-    altFilter.addEventListener('input', () => {
-        const q = altFilter.value.trim().toLowerCase();
-        let visible = 0;
-        allThumbs.forEach(el => {
-            const match = !q || el.dataset.setName.includes(q);
-            el.style.display = match ? '' : 'none';
-            if (match) visible++;
-        });
-        altCount.textContent = q ? `(${visible} of ${allThumbs.length})` : `(${allThumbs.length})`;
-    });
-}
-
-// DFC flip on click
-const flipContainer = document.querySelector('.card-flip-container.is-dfc');
-if (flipContainer) {
-    const img = document.getElementById('cardFaceImg');
-    const front = flipContainer.dataset.front;
-    const back = flipContainer.dataset.back;
-    const hint = flipContainer.querySelector('.card-flip-hint');
-    let showingBack = false;
-    let backLoaded = false;
-    flipContainer.style.cursor = 'pointer';
-    flipContainer.addEventListener('click', () => {
-        showingBack = !showingBack;
-        if (showingBack) {
-            if (!backLoaded) {
-                const preload = new Image();
-                preload.onload = () => { backLoaded = true; img.src = back; };
-                preload.onerror = () => {};
-                preload.src = back;
-            } else {
-                img.src = back;
-            }
-            if (hint) hint.textContent = 'Click to flip back';
-        } else {
-            img.src = front;
-            if (hint) hint.textContent = 'Click to flip';
-        }
-    });
-}
 </script>
+{% include 'cards/_card_detail_js.html' %}
 {% endblock %}

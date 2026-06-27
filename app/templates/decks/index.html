@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Decks - MTG Manager{% endblock %}
+{% block title %}Decks - TheJar{% endblock %}
 
 {% block content %}
 <div class="deck-list-page">
@@ -15,19 +15,30 @@
     {% if decks %}
     <div class="deck-grid">
         {% for deck in decks %}
-        <a href="/decks/{{ deck.id }}" class="deck-card">
-            <div class="deck-card-format">{{ format_labels.get(deck.format, deck.format) }}</div>
-            <div class="deck-card-name">{{ deck.name }}</div>
-            <div class="deck-card-meta">
-                <span>{{ deck.total_cards }} cards</span>
-                {% set colors = deck_colors.get(deck.id, []) %}
-                {% if colors %}
-                <span class="deck-card-colors">
-                    {% for c in colors %}<i class="ms ms-{{ c | lower }} ms-cost ms-shadow"></i>{% endfor %}
-                </span>
-                {% endif %}
+        <div class="deck-card-wrap">
+            <a href="/decks/{{ deck.id }}" class="deck-card">
+                <div class="deck-card-format">{{ format_labels.get(deck.format, deck.format) }}</div>
+                <div class="deck-card-name">{{ deck.name }}</div>
+                <div class="deck-card-meta">
+                    <span>{{ deck.total_cards }} cards</span>
+                    {% set colors = deck_colors.get(deck.id, []) %}
+                    {% if colors %}
+                    <span class="deck-card-colors">
+                        {% for c in colors %}<i class="ms ms-{{ c | lower }} ms-cost ms-shadow"></i>{% endfor %}
+                    </span>
+                    {% endif %}
+                </div>
+            </a>
+            <div class="deck-card-actions">
+                <form method="POST" action="/decks/{{ deck.id }}/clone" style="display:inline;">
+                    <button type="submit" class="btn btn-secondary btn-xs" title="Clone this deck">⎘ Clone</button>
+                </form>
+                <form method="POST" action="/decks/{{ deck.id }}/delete" style="display:inline;"
+                      onsubmit="return confirm('Delete {{ deck.name | e }}?');">
+                    <button type="submit" class="btn btn-danger btn-xs">✕</button>
+                </form>
             </div>
-        </a>
+        </div>
         {% endfor %}
     </div>
     {% else %}

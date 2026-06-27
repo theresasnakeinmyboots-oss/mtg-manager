@@ -34,6 +34,24 @@ def index():
     # Build a lookup so we can show set names for selected codes
     set_name_map = {code: name for code, name in all_sets}
 
+    # Sets-overview stats (only needed when no specific sets are selected)
+    owned_sets = []
+    if not set_codes:
+        owned_where = 'AND c.collection_id = ?' if collection_id else ''
+        params = [collection_id] if collection_id else []
+        owned_sets = db.execute(f'''
+            SELECT b.set_code, b.set_name,
+                   COUNT(DISTINCT b.scryfall_id) as total_cards,
+                   COUNT(DISTINCT CASE WHEN c.id IS NOT NULL THEN b.scryfall_id END) as owned_distinct,
+                   COALESCE(SUM(c.count), 0) as owned_total
+            FROM scryfall_bulk b
+            LEFT JOIN cards k ON b.scryfall_id = k.scryfall_id
+            LEFT JOIN collection c ON c.card_id = k.id {owned_where}
+            GROUP BY b.set_code
+            HAVING owned_distinct > 0
+            ORDER BY b.set_name
+        ''', params).fetchall()
+
     # One group per selected set: {set_code, set_name, cards[]}
     groups = []
 
@@ -107,6 +125,7 @@ def index():
                            all_sets=all_sets,
                            all_collections=all_collections,
                            groups=groups,
+                           owned_sets=owned_sets,
                            set_codes=set_codes,
                            collection_id=collection_id or '',
                            filter_color=filter_color,

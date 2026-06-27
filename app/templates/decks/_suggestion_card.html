@@ -1,0 +1,40 @@
+<div class="sugg-card {% if card.owned %}sugg-owned{% endif %}"
+     data-scryfall-id="{{ card.scryfall_id }}"
+     data-card-name="{{ card.name | e }}"
+     {% if card.image_uri_normal %}data-img="{{ card.image_uri_normal }}"{% endif %}>
+
+    <div class="sugg-card-img">
+        {% if card.image_uri_normal %}
+        <img src="{{ card.image_uri_normal }}" alt="{{ card.name }}" loading="lazy">
+        {% else %}
+        <div class="no-image-thumb">{{ card.name }}</div>
+        {% endif %}
+        {% if card.owned %}
+        <span class="sugg-owned-badge">owned</span>
+        {% endif %}
+    </div>
+
+    <div class="sugg-card-info">
+        <div class="sugg-card-name">{{ card.name }}</div>
+        <div class="sugg-card-type">{{ card.type_line or '' }}</div>
+        <div class="sugg-card-stats">
+            <span class="sugg-synergy" title="Synergy score">
+                ⚡ {{ '%+.0f%%' | format(card.synergy * 100) }}
+            </span>
+            <span class="sugg-inclusion" title="Inclusion rate">
+                {{ card.pct }}% of {{ '{:,}'.format(card.potential_decks) }} decks
+            </span>
+            {% if card.price_usd %}
+            <span class="sugg-price">${{ '%.2f' | format(card.price_usd) }}</span>
+            {% endif %}
+        </div>
+        <div class="sugg-card-actions">
+            <select class="sugg-board-select">
+                <option value="main">Main</option>
+                <option value="side">Side</option>
+                <option value="commander">Cmdr</option>
+            </select>
+            <button class="sugg-add-btn" data-sid="{{ card.scryfall_id }}">Add</button>
+        </div>
+    </div>
+</div>

@@ -133,10 +133,10 @@ def import_dlens(dlens_path: str, datadb_path: str, db, collection_id: int = Non
                 '''INSERT INTO collection
                    (name, edition, card_number, count, tradelist_count, condition, language,
                     foil, signed, artist_proof, altered_art, misprint, promo, textless,
-                    my_price, imported_at, collection_id, card_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    my_price, imported_at, collection_id, card_id, scryfall_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (name, edition, card_number, quantity, 0, condition, language,
-                 foil, 0, 0, 0, 0, 0, 0, None, now, collection_id, card_id)
+                 foil, 0, 0, 0, 0, 0, 0, None, now, collection_id, card_id, scryfall_id)
             )
             inserted += 1
 

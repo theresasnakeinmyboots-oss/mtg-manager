@@ -1,0 +1,47 @@
+<script>
+// Alt printings filter
+const altFilter = document.getElementById('altFilter');
+if (altFilter) {
+    const allThumbs = Array.from(document.querySelectorAll('.alt-thumb'));
+    const altCount = document.getElementById('altCount');
+    altFilter.addEventListener('input', () => {
+        const q = altFilter.value.trim().toLowerCase();
+        let visible = 0;
+        allThumbs.forEach(el => {
+            const match = !q || el.dataset.setName.includes(q);
+            el.style.display = match ? '' : 'none';
+            if (match) visible++;
+        });
+        altCount.textContent = q ? `(${visible} of ${allThumbs.length})` : `(${allThumbs.length})`;
+    });
+}
+
+// DFC flip on click
+const flipContainer = document.querySelector('.card-flip-container.is-dfc');
+if (flipContainer) {
+    const img = document.getElementById('cardFaceImg');
+    const front = flipContainer.dataset.front;
+    const back = flipContainer.dataset.back;
+    const hint = flipContainer.querySelector('.card-flip-hint');
+    let showingBack = false;
+    let backLoaded = false;
+    flipContainer.style.cursor = 'pointer';
+    flipContainer.addEventListener('click', () => {
+        showingBack = !showingBack;
+        if (showingBack) {
+            if (!backLoaded) {
+                const preload = new Image();
+                preload.onload = () => { backLoaded = true; img.src = back; };
+                preload.onerror = () => {};
+                preload.src = back;
+            } else {
+                img.src = back;
+            }
+            if (hint) hint.textContent = 'Click to flip back';
+        } else {
+            img.src = front;
+            if (hint) hint.textContent = 'Click to flip';
+        }
+    });
+}
+</script>

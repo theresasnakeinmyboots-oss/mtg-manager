@@ -1,0 +1,15 @@
+{% if decks_with_card %}
+<div class="cd-section">
+    <span class="cd-label">In Your Decks</span>
+    <ul class="cd-deck-list">
+        {% for d in decks_with_card %}
+        <li class="cd-deck-row">
+            <a href="/decks/{{ d.id }}">{{ d.name }}</a>
+            <span class="cd-deck-meta">
+                {% if d.board and d.board != 'main' %}{{ d.board|capitalize }} · {% endif %}×{{ d.count }}
+            </span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}

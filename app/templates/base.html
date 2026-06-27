@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}MTG Collection Manager{% endblock %}</title>
+    <title>{% block title %}TheJar{% endblock %}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/keyrune@latest/css/keyrune.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='mana.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
@@ -15,7 +16,10 @@
 <body>
     <nav class="navbar">
         <div class="nav-container">
-            <a href="/" class="nav-brand">MTG Collection Manager</a>
+            <a href="/" class="nav-brand">
+                <img src="{{ url_for('static', filename='favicon.png') }}" class="nav-brand-icon" alt="">
+                TheJar
+            </a>
             <ul class="nav-menu">
                 <li><a href="/collection" class="nav-link">Browse</a></li>
                 <li><a href="/collections" class="nav-link">Collections</a></li>
@@ -32,7 +36,7 @@
     </main>
 
     <footer class="footer">
-        <p>&copy; 2026 MTG Collection Manager</p>
+        <p>&copy; 2026 TheJar</p>
     </footer>
     <script src="{{ url_for('static', filename='card-effects.js') }}"></script>
     <script src="{{ url_for('static', filename='deck-menu.js') }}"></script>

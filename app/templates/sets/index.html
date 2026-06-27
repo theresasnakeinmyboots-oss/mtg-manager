@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Set View{% if groups %} — {{ groups|map(attribute='set_name')|join(', ') }}{% endif %} - MTG Manager{% endblock %}
+{% block title %}Set View{% if groups %} — {{ groups|map(attribute='set_name')|join(', ') }}{% endif %} - TheJar{% endblock %}
 
 {% block content %}
 <div class="set-view-page">
@@ -105,22 +105,18 @@
                 {% for card in group.cards %}
                 <div class="set-card-thumb {% if card.owned_count == 0 %}unowned{% endif %}"
                      data-name="{{ card.name | e }}" data-set-name="{{ group.set_name | e }}"
-                     data-scryfall-id="{{ card.scryfall_id }}" data-card-name="{{ card.name | e }}"
-                     style="cursor:pointer;">
-                    {% if card.collection_row_id %}
-                    <a href="/collection/{{ card.collection_row_id }}">
-                    {% endif %}
+                     data-scryfall-id="{{ card.scryfall_id }}" data-card-name="{{ card.name | e }}">
+                    <a href="{% if card.collection_row_id %}/collection/{{ card.collection_row_id }}{% else %}/card/{{ card.scryfall_id }}{% endif %}">
                         {% if card.image_uri_normal %}
                         <img src="{{ card.image_uri_normal }}" alt="{{ card.name }}" loading="lazy">
                         {% else %}
                         <div class="no-image-thumb">{{ card.name }}</div>
                         {% endif %}
-                    {% if card.collection_row_id %}
                     </a>
-                    {% endif %}
                     {% if card.owned_count > 0 %}
                     <span class="thumb-count">×{{ card.owned_count }}</span>
                     {% endif %}
+                    <button class="set-card-want-btn" title="Add to purchase list">+</button>
                     <div class="set-card-num">#{{ card.collector_number }}</div>
                 </div>
                 {% endfor %}
@@ -131,8 +127,32 @@
         </div>
         {% endfor %}
 
+    {% elif owned_sets %}
+    <div class="set-overview-grid">
+        {% for s in owned_sets %}
+        <a class="set-overview-card" href="/sets?set={{ s.set_code }}{% if collection_id %}&coll={{ collection_id }}{% endif %}">
+            <div class="set-overview-card-top">
+                <img class="set-overview-symbol" src="https://svgs.scryfall.io/sets/{{ s.set_code|lower }}.svg"
+                     alt="{{ s.set_code }}" loading="lazy" onerror="this.style.visibility='hidden'">
+                <div class="set-overview-name">{{ s.set_name }}</div>
+            </div>
+            <div class="set-overview-stats">
+                <div class="set-overview-bar">
+                    <div class="set-overview-bar-fill" style="width:{{ (s.owned_distinct / s.total_cards * 100) if s.total_cards else 0 }}%;"></div>
+                </div>
+                <div class="set-overview-counts">
+                    <span>{{ s.owned_distinct }} / {{ s.total_cards }} unique</span>
+                    <span class="set-overview-pct">{{ "%.0f"|format((s.owned_distinct / s.total_cards * 100) if s.total_cards else 0) }}%</span>
+                </div>
+                {% if s.owned_total != s.owned_distinct %}
+                <div class="set-overview-total">{{ s.owned_total }} total copies</div>
+                {% endif %}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
     {% else %}
-    <div class="empty-state"><p>Select one or more sets above to get started.</p></div>
+    <div class="empty-state"><p>You don't own any cards yet — select one or more sets above to browse, or import a collection.</p></div>
     {% endif %}
 
 </div>
@@ -214,13 +234,12 @@ function setCardSelected(thumb, name, setName, on) {
     updatePurchaseBtn();
 }
 
-// Click any card thumb to toggle selection
-// Prevent inner <a> from navigating so the whole thumb acts as a toggle
-document.querySelectorAll('.set-card-thumb a').forEach(a => {
-    a.addEventListener('click', e => e.preventDefault());
-});
-document.querySelectorAll('.set-card-thumb').forEach(thumb => {
-    thumb.addEventListener('click', () => {
+// Click the image to open card details. The "+" button toggles purchase-list selection.
+document.querySelectorAll('.set-card-want-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const thumb = btn.closest('.set-card-thumb');
         const name = thumb.dataset.name;
         const setName = thumb.dataset.setName;
         setCardSelected(thumb, name, setName, !thumb.classList.contains('selected'));

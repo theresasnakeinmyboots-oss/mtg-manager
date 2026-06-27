@@ -1,0 +1,78 @@
+<div class="cd-field">
+    <span class="cd-label">Card Name</span>
+    <span class="cd-value cd-name">{{ card.name }}</span>
+</div>
+
+{% if card.mana_cost %}
+<div class="cd-field">
+    <span class="cd-label">Mana Cost</span>
+    <span class="cd-value mana-symbols">{{ card.mana_cost|format_mana_cost|safe }}</span>
+</div>
+{% endif %}
+
+<div class="cd-field cd-field-split">
+    <div>
+        <span class="cd-label">Type</span>
+        <span class="cd-value cd-type">{{ card.type_line }}</span>
+    </div>
+    <div>
+        <span class="cd-label">Rarity</span>
+        <span class="cd-value">{{ card.rarity|title if card.rarity else '—' }}</span>
+    </div>
+</div>
+
+<hr class="cd-divider">
+
+{% if card.oracle_text %}
+<div class="cd-field">
+    <span class="cd-label">Rules Text</span>
+    <div class="cd-value cd-rules">
+        {% for line in card.oracle_text.split('\n') %}
+        <p>{{ line|format_oracle_text|safe }}</p>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if card.flavor_text %}
+<div class="cd-field">
+    <span class="cd-label">Flavor Text</span>
+    <p class="cd-value cd-flavor">{{ card.flavor_text|format_oracle_text|safe }}</p>
+</div>
+{% endif %}
+
+<hr class="cd-divider">
+
+<div class="cd-field cd-field-split">
+    <div>
+        <span class="cd-label">Artist</span>
+        <span class="cd-value cd-highlight">{{ card.artist or '—' }}</span>
+    </div>
+    {% if card.power and card.toughness %}
+    <div>
+        <span class="cd-label">P/T</span>
+        <span class="cd-value cd-highlight">{{ card.power }}/{{ card.toughness }}</span>
+    </div>
+    {% endif %}
+</div>
+
+<div class="cd-field cd-field-split">
+    <div>
+        <span class="cd-label">Set</span>
+        <span class="cd-value cd-highlight">
+            {% if card.set_code %}{{ card.set_code|format_set_symbol(card.rarity)|safe }} {% endif %}
+            {{ card.set_name or card.edition }}
+        </span>
+    </div>
+    <div>
+        <span class="cd-label">Number</span>
+        <span class="cd-value">{{ card.card_number or card.collector_number or '—' }}</span>
+    </div>
+</div>
+
+{% if card.language %}
+<div class="cd-field">
+    <span class="cd-label">Language</span>
+    <span class="cd-value">{{ card.language or 'English' }}</span>
+</div>
+{% endif %}

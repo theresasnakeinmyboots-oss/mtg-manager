@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ card.name }} - TheJar{% endblock %}
+
+{% block content %}
+<div class="card-detail-page">
+    <a href="javascript:history.back()" class="btn btn-secondary btn-sm back-btn">← Back</a>
+
+    <div class="card-detail-layout">
+
+        <!-- Left: card image -->
+        <div class="card-detail-left">
+            {% include 'cards/_card_image.html' %}
+        </div>
+
+        <!-- Centre: card info -->
+        <div class="card-detail-centre">
+            {% include 'cards/_card_info.html' %}
+        </div>
+
+        <!-- Right: legalities + market + ownership summary -->
+        <div class="card-detail-right">
+
+            {% include 'cards/_card_market.html' %}
+
+            <div class="cd-section">
+                <span class="cd-label">In Your Collection</span>
+                {% if owned_total %}
+                <p class="cd-formats">You own {{ owned_total }} cop{{ 'y' if owned_total == 1 else 'ies' }} of {{ card.name }} (other printings).</p>
+                {% else %}
+                <p class="cd-formats">Not in your collection.</p>
+                {% endif %}
+            </div>
+
+            {% include 'cards/_card_decks.html' %}
+
+        </div>
+    </div>
+</div>
+
+{% set can_switch = false %}
+{% include 'cards/_printings_carousel.html' %}
+
+{% include 'cards/_card_detail_js.html' %}
+{% endblock %}

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Collections - MTG Manager{% endblock %}
+{% block title %}Collections - TheJar{% endblock %}
 {% block content %}
 <div class="collections-page">
 
@@ -24,7 +24,25 @@
                     · Created {{ c.created_at[:10] }}
                 </p>
             </div>
+            {% if c.unenriched_count %}
+            <div class="collection-enrich-bar" id="enrichBar{{ c.id }}" style="display:none;">
+                <div class="enrich-progress-track"><div class="enrich-progress-fill" id="enrichFill{{ c.id }}"></div></div>
+                <span class="enrich-progress-label" id="enrichLabel{{ c.id }}"></span>
+            </div>
+            {% endif %}
             <div class="collection-card-actions">
+                {% if c.unenriched_count %}
+                <button class="btn btn-secondary btn-sm enrich-btn"
+                        data-id="{{ c.id }}" data-count="{{ c.unenriched_count }}">
+                    ✦ Enrich {{ c.unenriched_count }}
+                </button>
+                {% endif %}
+                <button class="btn btn-secondary btn-sm add-import-btn" data-id="{{ c.id }}" data-name="{{ c.name }}"
+                        title="Import a file and add its cards on top of this collection">+ Add Import</button>
+                <button class="btn btn-secondary btn-sm replace-import-btn" data-id="{{ c.id }}" data-name="{{ c.name }}"
+                        title="Import a file and reconcile this collection to match it exactly">⟲ Replace from Import</button>
+                <button class="btn btn-secondary btn-sm export-dlens-btn" data-id="{{ c.id }}"
+                        title="Export to a .dlens file for Delver Lens">⇩ Delver Lens</button>
                 <button class="btn btn-secondary btn-sm rename-btn" data-id="{{ c.id }}" data-name="{{ c.name }}">Rename</button>
                 <button class="btn btn-danger btn-sm delete-btn" data-id="{{ c.id }}" data-name="{{ c.name }}">Delete</button>
             </div>
@@ -85,6 +103,13 @@
                     {% endfor %}
                 </select>
             </div>
+            <div id="replaceModeRow" style="display:none;">
+                <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.85rem; color:var(--text-secondary); cursor:pointer;">
+                    <input type="checkbox" id="replaceModeCheck">
+                    Replace contents instead of adding — reconciles to match this import exactly,
+                    keeping existing card ids (and any deck/set links) wherever the same card is still present.
+                </label>
+            </div>
             <div style="text-align:center; color:var(--text-secondary); font-size:0.85rem;">or</div>
             <div>
                 <label style="font-size:0.9rem; color:var(--text-secondary); display:block; margin-bottom:0.4rem;">Create new collection</label>
@@ -93,6 +118,41 @@
             <button id="assignConfirm" class="btn btn-primary">Move Cards</button>
             <div id="assignStatus"></div>
         </div>
+    </div>
+</div>
+
+<!-- Replace-contents preview modal -->
+<div id="replacePreviewModal" class="modal" style="display:none;">
+    <div class="modal-content">
+        <h2>Confirm Replace</h2>
+        <div id="replacePreviewBody" style="color:var(--text-secondary); font-size:0.9rem;"></div>
+        <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
+            <button id="replaceConfirmBtn" class="btn btn-danger">Replace</button>
+            <button id="replaceCancelBtn" class="btn btn-secondary">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Direct import modal (Add or Replace into a known collection — no destination picker) -->
+<div id="directImportModal" class="modal" style="display:none;">
+    <div class="modal-content import-modal-content">
+        <span class="modal-close" id="directImportClose">&times;</span>
+        <h2 id="directImportTitle">Add Import</h2>
+        <p id="directImportDesc" style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:0.75rem;">
+            Accepts <strong>.csv</strong> (Deckbox export) or <strong>.dlens</strong> (Delver Lens) files.
+        </p>
+        <form id="directImportForm">
+            <input type="file" name="file" accept=".csv,.dlens" required>
+            <button type="submit" class="btn btn-primary" style="margin-top:1rem;">Upload &amp; Enrich</button>
+        </form>
+        <div id="directEnrichingPane" style="display:none; margin-top:1.25rem;">
+            <div class="progress-bar" style="margin-bottom:0.75rem;">
+                <div id="directProgressFill" class="progress-fill" style="width:0%"></div>
+            </div>
+            <p id="directProgressMessage" style="color:var(--text-secondary); font-size:0.85rem; margin-bottom:0.75rem;"></p>
+            <div id="directCardFeed" class="card-feed"></div>
+        </div>
+        <div id="directImportStatus"></div>
     </div>
 </div>
 
@@ -140,22 +200,51 @@ document.querySelectorAll('.delete-btn').forEach(btn => {
 
 // Assign staging
 const assignModal = document.getElementById('assignModal');
+const destSelect = document.getElementById('destSelect');
+const destNewName = document.getElementById('destNewName');
+const replaceModeRow = document.getElementById('replaceModeRow');
+const replaceModeCheck = document.getElementById('replaceModeCheck');
+
+function syncReplaceModeVisibility() {
+    const showReplace = !!destSelect.value;
+    replaceModeRow.style.display = showReplace ? '' : 'none';
+    if (!showReplace) replaceModeCheck.checked = false;
+}
+destSelect.addEventListener('change', syncReplaceModeVisibility);
+destNewName.addEventListener('input', () => {
+    if (destNewName.value.trim()) { destSelect.value = ''; syncReplaceModeVisibility(); }
+});
+
 document.querySelectorAll('.assign-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         pendingStagingId = parseInt(btn.dataset.id);
         document.getElementById('assignSummary').textContent =
             `"${btn.dataset.name}" has ${btn.dataset.count} cards. Choose where to put them:`;
+        destSelect.value = '';
+        destNewName.value = '';
+        syncReplaceModeVisibility();
         assignModal.style.display = 'block';
     });
 });
 
 document.getElementById('assignConfirm').addEventListener('click', async () => {
-    const destId = document.getElementById('destSelect').value;
-    const destName = document.getElementById('destNewName').value.trim();
+    const destId = destSelect.value;
+    const destName = destNewName.value.trim();
     if (!destId && !destName) {
         document.getElementById('assignStatus').innerHTML = '<p class="error">Please choose or name a collection.</p>';
         return;
     }
+
+    if (destId && replaceModeCheck.checked) {
+        const btn = document.getElementById('assignConfirm');
+        btn.disabled = true; btn.textContent = 'Checking…';
+        await runReplacePreview(pendingStagingId, parseInt(destId), (message) => {
+            document.getElementById('assignStatus').innerHTML = `<p class="error">✗ ${message}</p>`;
+        }, assignModal);
+        btn.disabled = false; btn.textContent = 'Move Cards';
+        return;
+    }
+
     const btn = document.getElementById('assignConfirm');
     btn.disabled = true; btn.textContent = 'Moving…';
     const res = await fetch('/collections/assign', {
@@ -174,9 +263,292 @@ document.getElementById('assignConfirm').addEventListener('click', async () => {
     }
 });
 
+// Replace-contents preview + commit
+const replacePreviewModal = document.getElementById('replacePreviewModal');
+let replacePending = null;
+let replaceReturnModal = null;  // which modal Cancel should reopen
+
+// Runs the replace-preview check and shows the confirmation modal. `onError(message)`
+// lets each caller (the assign modal, the direct-import modal) report failures in its
+// own status area rather than this function reaching into a specific one.
+async function runReplacePreview(stagingId, destId, onError, returnModal) {
+    replaceReturnModal = returnModal || null;
+    try {
+        const res = await fetch('/collections/replace-preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ staging_id: stagingId, dest_id: destId })
+        });
+        const data = await res.json();
+        if (data.error) {
+            onError(data.error);
+            return;
+        }
+        replacePending = { stagingId, destId };
+        const removedList = data.removed_cards.slice(0, 20)
+            .map(c => `<li>${c.name} (${c.edition}) ×${c.count}</li>`).join('');
+        const more = data.removed_cards.length > 20 ? `<li>…and ${data.removed_cards.length - 20} more</li>` : '';
+        document.getElementById('replacePreviewBody').innerHTML = `
+            <p>${data.kept} cards kept, ${data.added} new cards added.</p>
+            ${data.removed > 0 ? `
+                <p style="color:var(--danger); font-weight:600; margin-top:0.75rem;">
+                    ${data.removed} card${data.removed !== 1 ? 's' : ''} will be removed
+                    — not present in this import:
+                </p>
+                <ul style="max-height:200px; overflow-y:auto; margin-top:0.5rem;">${removedList}${more}</ul>
+            ` : `<p style="margin-top:0.75rem;">Nothing will be removed.</p>`}
+        `;
+        assignModal.style.display = 'none';
+        directImportModal.style.display = 'none';
+        replacePreviewModal.style.display = 'block';
+    } catch (err) {
+        onError(err.message);
+    }
+}
+
+document.getElementById('replaceCancelBtn').addEventListener('click', () => {
+    replacePreviewModal.style.display = 'none';
+    if (replaceReturnModal) replaceReturnModal.style.display = 'block';
+});
+
+document.getElementById('replaceConfirmBtn').addEventListener('click', async () => {
+    if (!replacePending) return;
+    const btn = document.getElementById('replaceConfirmBtn');
+    btn.disabled = true; btn.textContent = 'Replacing…';
+    try {
+        const res = await fetch('/collections/replace-commit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ staging_id: replacePending.stagingId, dest_id: replacePending.destId })
+        });
+        const data = await res.json();
+        if (data.success) {
+            location.reload();
+        } else {
+            btn.disabled = false; btn.textContent = 'Replace';
+            alert(data.error);
+        }
+    } catch (err) {
+        btn.disabled = false; btn.textContent = 'Replace';
+        alert(err.message);
+    }
+});
+
 window.addEventListener('click', e => {
     if (e.target === newModal) newModal.style.display = 'none';
     if (e.target === assignModal) assignModal.style.display = 'none';
+    if (e.target === replacePreviewModal) replacePreviewModal.style.display = 'none';
+    if (e.target === directImportModal) directImportModal.style.display = 'none';
+});
+
+// Direct import: "+ Add Import" / "⟲ Replace from Import" on a specific collection.
+// No destination picker — the collection clicked IS the destination.
+const directImportModal = document.getElementById('directImportModal');
+const directImportTitle = document.getElementById('directImportTitle');
+const directImportDesc = document.getElementById('directImportDesc');
+const directImportForm = document.getElementById('directImportForm');
+let directImportMode = null;   // 'add' | 'replace'
+let directImportDestId = null;
+let directImportDestName = null;
+
+function openDirectImport(mode, destId, destName) {
+    directImportMode = mode;
+    directImportDestId = destId;
+    directImportDestName = destName;
+    directImportTitle.textContent = mode === 'replace'
+        ? `Replace contents of "${destName}"`
+        : `Add import to "${destName}"`;
+    directImportDesc.textContent = mode === 'replace'
+        ? 'Upload a .csv or .dlens file. You\'ll see a preview of what will be added/removed before anything changes.'
+        : 'Upload a .csv or .dlens file. New cards are added; cards you already have get their counts increased.';
+    document.getElementById('directImportStatus').innerHTML = '';
+    document.getElementById('directEnrichingPane').style.display = 'none';
+    directImportForm.reset();
+    directImportForm.style.display = '';
+    directImportForm.querySelector('button').disabled = false;
+    directImportModal.style.display = 'block';
+}
+
+document.querySelectorAll('.add-import-btn').forEach(btn => {
+    btn.addEventListener('click', () => openDirectImport('add', parseInt(btn.dataset.id), btn.dataset.name));
+});
+document.querySelectorAll('.replace-import-btn').forEach(btn => {
+    btn.addEventListener('click', () => openDirectImport('replace', parseInt(btn.dataset.id), btn.dataset.name));
+});
+
+document.getElementById('directImportClose').addEventListener('click', () => {
+    directImportModal.style.display = 'none';
+});
+
+directImportForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const status = document.getElementById('directImportStatus');
+    const enrichingPane = document.getElementById('directEnrichingPane');
+    const progressFill = document.getElementById('directProgressFill');
+    const progressMessage = document.getElementById('directProgressMessage');
+    const cardFeed = document.getElementById('directCardFeed');
+
+    status.innerHTML = '';
+    enrichingPane.style.display = 'block';
+    progressFill.style.width = '0%';
+    progressMessage.textContent = 'Uploading…';
+    cardFeed.innerHTML = '';
+    e.target.querySelector('button').disabled = true;
+
+    try {
+        const response = await fetch('/collections/import', { method: 'POST', body: formData });
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let results = null;
+        let buf = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                let data;
+                try { data = JSON.parse(line.slice(6)); } catch (_) { continue; }
+
+                progressFill.style.width = data.progress + '%';
+
+                if (data.status === 'card') {
+                    progressMessage.textContent = `Enriching ${data.current} / ${data.total}…`;
+                    const el = document.createElement('div');
+                    el.className = 'card-feed-item ' + (data.ok ? 'feed-ok' : 'feed-fail');
+                    if (data.ok) {
+                        el.textContent = data.name;
+                    } else {
+                        el.innerHTML = `<span class="feed-name">${data.name}</span><span class="feed-reason">${data.reason || 'Not found'}</span>`;
+                    }
+                    cardFeed.appendChild(el);
+                    cardFeed.scrollTop = cardFeed.scrollHeight;
+                    if (data.ok) setTimeout(() => el.remove(), 1000);
+                } else if (data.status === 'enriching' || data.status === 'importing') {
+                    progressMessage.textContent = data.message;
+                } else if (data.status === 'complete') {
+                    results = data;
+                } else if (data.status === 'error') {
+                    status.innerHTML = `<p class="error">✗ ${data.message}</p>`;
+                }
+            }
+        }
+
+        if (!results) return;
+
+        if (directImportMode === 'replace') {
+            directImportForm.style.display = 'none';
+            enrichingPane.style.display = 'none';
+            await runReplacePreview(results.staging_id, directImportDestId, (message) => {
+                status.innerHTML = `<p class="error">✗ ${message}</p>`;
+                directImportForm.style.display = '';
+                directImportForm.querySelector('button').disabled = false;
+            }, directImportModal);
+        } else {
+            progressMessage.textContent = 'Adding to collection…';
+            const res = await fetch('/collections/assign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ staging_id: results.staging_id, dest_id: directImportDestId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                status.innerHTML = `<p class="success">✓ ${data.moved + data.merged} cards added to "${data.dest_name}" (${data.merged} merged with existing).</p>`;
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                status.innerHTML = `<p class="error">✗ ${data.error}</p>`;
+                e.target.querySelector('button').disabled = false;
+            }
+        }
+    } catch (err) {
+        enrichingPane.style.display = 'none';
+        status.innerHTML = `<p class="error">✗ Error: ${err.message}</p>`;
+        e.target.querySelector('button').disabled = false;
+    }
+});
+
+// Bulk enrich
+document.querySelectorAll('.enrich-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const bar = document.getElementById(`enrichBar${id}`);
+        const fill = document.getElementById(`enrichFill${id}`);
+        const label = document.getElementById(`enrichLabel${id}`);
+        btn.disabled = true;
+        btn.textContent = 'Enriching…';
+        bar.style.display = 'flex';
+        fill.style.width = '0%';
+        label.textContent = 'Starting…';
+
+        const es = new EventSource(`/collections/${id}/enrich`);
+        es.onmessage = e => {
+            const data = JSON.parse(e.data);
+            if (data.status === 'card' || data.status === 'enriching') {
+                fill.style.width = data.progress + '%';
+                label.textContent = data.message || `${data.current}/${data.total}`;
+            } else if (data.status === 'complete') {
+                es.close();
+                fill.style.width = '100%';
+                label.textContent = `✓ ${data.enriched}/${data.total} enriched`;
+                btn.textContent = '✓ Done';
+                setTimeout(() => location.reload(), 1200);
+            } else if (data.status === 'error') {
+                es.close();
+                label.textContent = `✗ ${data.message}`;
+                btn.disabled = false;
+                btn.textContent = '✦ Retry';
+            }
+        };
+        es.onerror = () => {
+            es.close();
+            label.textContent = '✗ Connection error';
+            btn.disabled = false;
+            btn.textContent = '✦ Retry';
+        };
+    });
+});
+
+// Export to Delver Lens
+document.querySelectorAll('.export-dlens-btn').forEach(btn => {
+    const originalText = btn.textContent;
+    btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        btn.disabled = true;
+        btn.textContent = 'Exporting…';
+        try {
+            const res = await fetch(`/collections/${id}/export-dlens`);
+            if (!res.ok) {
+                const data = await res.json();
+                alert(data.error || 'Export failed');
+                return;
+            }
+            const missing = parseInt(res.headers.get('X-Export-Missing') || '0');
+            const count = parseInt(res.headers.get('X-Export-Count') || '0');
+            const blob = await res.blob();
+            const disposition = res.headers.get('Content-Disposition') || '';
+            const match = disposition.match(/filename=([^;]+)/);
+            const filename = match ? match[1].trim() : 'export.dlens';
+
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(a.href);
+
+            if (missing > 0) {
+                alert(`Exported ${count} cards. ${missing} card${missing !== 1 ? 's' : ''} skipped (not enriched / not found in data.db) — enrich the collection and re-export to include them.`);
+            }
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    });
 });
 </script>
 {% endblock %}
