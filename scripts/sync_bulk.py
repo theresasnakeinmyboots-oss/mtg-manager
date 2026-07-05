@@ -37,6 +37,10 @@ def format_card(c):
     mana_cost = c.get('mana_cost', '')
     if not mana_cost and c.get('card_faces'):
         mana_cost = c['card_faces'][0].get('mana_cost', '')
+    # oracle_id lives on card_faces (not top level) for reversible layouts
+    oracle_id = c.get('oracle_id')
+    if not oracle_id and c.get('card_faces'):
+        oracle_id = c['card_faces'][0].get('oracle_id')
     prices = c.get('prices') or {}
     return (
         c['id'],
@@ -62,7 +66,27 @@ def format_card(c):
         to_float(prices.get('usd_foil')),
         to_float(prices.get('eur')),
         to_float(prices.get('eur_foil')),
+        oracle_id,
     )
+
+
+UPSERT_SQL = '''INSERT INTO scryfall_bulk
+   (scryfall_id, name, set_code, set_name, collector_number, mana_cost, cmc,
+    colors, color_identity, type_line, oracle_text, flavor_text, power, toughness,
+    rarity, legalities, image_uri_normal, image_uri_small, artist,
+    price_usd, price_usd_foil, price_eur, price_eur_foil, oracle_id)
+   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+   ON CONFLICT(scryfall_id) DO UPDATE SET
+       name=excluded.name, set_code=excluded.set_code, set_name=excluded.set_name,
+       collector_number=excluded.collector_number, mana_cost=excluded.mana_cost,
+       cmc=excluded.cmc, colors=excluded.colors, color_identity=excluded.color_identity,
+       type_line=excluded.type_line, oracle_text=excluded.oracle_text,
+       flavor_text=excluded.flavor_text, power=excluded.power, toughness=excluded.toughness,
+       rarity=excluded.rarity, legalities=excluded.legalities,
+       image_uri_normal=excluded.image_uri_normal, image_uri_small=excluded.image_uri_small,
+       artist=excluded.artist, price_usd=excluded.price_usd,
+       price_usd_foil=excluded.price_usd_foil, price_eur=excluded.price_eur,
+       price_eur_foil=excluded.price_eur_foil, oracle_id=excluded.oracle_id'''
 
 
 def main():
@@ -115,26 +139,7 @@ def main():
             continue
         batch.append(format_card(card))
         if len(batch) >= BATCH_SIZE:
-            db.executemany(
-                '''INSERT INTO scryfall_bulk
-                   (scryfall_id, name, set_code, set_name, collector_number, mana_cost, cmc,
-                    colors, color_identity, type_line, oracle_text, flavor_text, power, toughness,
-                    rarity, legalities, image_uri_normal, image_uri_small, artist,
-                    price_usd, price_usd_foil, price_eur, price_eur_foil)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                   ON CONFLICT(scryfall_id) DO UPDATE SET
-                       name=excluded.name, set_code=excluded.set_code, set_name=excluded.set_name,
-                       collector_number=excluded.collector_number, mana_cost=excluded.mana_cost,
-                       cmc=excluded.cmc, colors=excluded.colors, color_identity=excluded.color_identity,
-                       type_line=excluded.type_line, oracle_text=excluded.oracle_text,
-                       flavor_text=excluded.flavor_text, power=excluded.power, toughness=excluded.toughness,
-                       rarity=excluded.rarity, legalities=excluded.legalities,
-                       image_uri_normal=excluded.image_uri_normal, image_uri_small=excluded.image_uri_small,
-                       artist=excluded.artist, price_usd=excluded.price_usd,
-                       price_usd_foil=excluded.price_usd_foil, price_eur=excluded.price_eur,
-                       price_eur_foil=excluded.price_eur_foil''',
-                batch
-            )
+            db.executemany(UPSERT_SQL, batch)
             inserted += len(batch)
             batch = []
             if (i + 1) % 50000 == 0:
@@ -142,26 +147,7 @@ def main():
                 print(f'  {i+1}/{total}…')
 
     if batch:
-        db.executemany(
-            '''INSERT INTO scryfall_bulk
-               (scryfall_id, name, set_code, set_name, collector_number, mana_cost, cmc,
-                colors, color_identity, type_line, oracle_text, flavor_text, power, toughness,
-                rarity, legalities, image_uri_normal, image_uri_small, artist,
-                price_usd, price_usd_foil, price_eur, price_eur_foil)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-               ON CONFLICT(scryfall_id) DO UPDATE SET
-                   name=excluded.name, set_code=excluded.set_code, set_name=excluded.set_name,
-                   collector_number=excluded.collector_number, mana_cost=excluded.mana_cost,
-                   cmc=excluded.cmc, colors=excluded.colors, color_identity=excluded.color_identity,
-                   type_line=excluded.type_line, oracle_text=excluded.oracle_text,
-                   flavor_text=excluded.flavor_text, power=excluded.power, toughness=excluded.toughness,
-                   rarity=excluded.rarity, legalities=excluded.legalities,
-                   image_uri_normal=excluded.image_uri_normal, image_uri_small=excluded.image_uri_small,
-                   artist=excluded.artist, price_usd=excluded.price_usd,
-                   price_usd_foil=excluded.price_usd_foil, price_eur=excluded.price_eur,
-                   price_eur_foil=excluded.price_eur_foil''',
-            batch
-        )
+        db.executemany(UPSERT_SQL, batch)
         inserted += len(batch)
 
     db.commit()
