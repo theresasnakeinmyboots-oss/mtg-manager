@@ -4,6 +4,7 @@ from pathlib import Path
 import threading
 import config
 from app.database import get_db as _get_db, get_setting, set_setting
+from app.routes.decks import resolve_commander
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -74,18 +75,7 @@ def index():
         "SELECT id, name FROM decks WHERE format='commander' ORDER BY name"
     ).fetchall()
     for deck in decks:
-        cmd = db.execute(
-            "SELECT dc.name FROM deck_cards dc WHERE dc.deck_id=? AND dc.board='commander' LIMIT 1",
-            [deck['id']]
-        ).fetchone()
-        if not cmd:
-            cmd = db.execute(
-                "SELECT dc.name FROM deck_cards dc "
-                "LEFT JOIN scryfall_bulk b ON dc.scryfall_id=b.scryfall_id "
-                "WHERE dc.deck_id=? AND b.type_line LIKE '%Legendary%Creature%' "
-                "ORDER BY b.cmc DESC, dc.name LIMIT 1",
-                [deck['id']]
-            ).fetchone()
+        cmd = resolve_commander(db, deck['id'])
         commander_name = cmd['name'] if cmd else None
 
         cache_row = None
@@ -136,18 +126,7 @@ def edhrec_refresh(deck_id):
     from app.database import get_db
     from app.edhrec import get_edhrec_data
     db = get_db()
-    cmd = db.execute(
-        "SELECT dc.name FROM deck_cards dc WHERE dc.deck_id=? AND dc.board='commander' LIMIT 1",
-        [deck_id]
-    ).fetchone()
-    if not cmd:
-        cmd = db.execute(
-            "SELECT dc.name FROM deck_cards dc "
-            "LEFT JOIN scryfall_bulk b ON dc.scryfall_id=b.scryfall_id "
-            "WHERE dc.deck_id=? AND b.type_line LIKE '%Legendary%Creature%' "
-            "ORDER BY b.cmc DESC, dc.name LIMIT 1",
-            [deck_id]
-        ).fetchone()
+    cmd = resolve_commander(db, deck_id)
     if not cmd:
         db.close()
         return jsonify(error='No commander found'), 404

@@ -38,13 +38,6 @@ _SECTION_RE = re.compile(
     re.IGNORECASE
 )
 
-_BASIC_LANDS = {
-    'Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes',
-    'Snow-Covered Plains', 'Snow-Covered Island', 'Snow-Covered Swamp',
-    'Snow-Covered Mountain', 'Snow-Covered Forest',
-}
-
-
 def parse_deck_list(text):
     """
     Parse raw text into a list of dicts:

@@ -10,6 +10,74 @@ Strategies define:
 import re
 from datetime import datetime, timezone
 
+# ── Core role-detection patterns ──────────────────────────────────────────────
+# These five patterns were copy-pasted (by hand, with drift) across health
+# computation, suggestion tagging, cut-candidate scoring, and auto-fill. They are
+# the single source of truth now; everything else imports from here.
+
+RAMP_RX = re.compile(
+    r'search your library for (a|up to \d+) (basic )?land|'
+    r'add \{[WUBRGC]\}|add (one|two|\d+) mana|add mana of any|untap target land',
+    re.IGNORECASE)
+REMOVAL_RX = re.compile(
+    r'destroy target|exile target|'
+    r'deals \d+ damage to (any target|target creature|each creature)|'
+    r'-\d+/-\d+|return target .* to (its owner|their owner)\'s hand|'
+    r'counter target (spell|creature|artifact|enchantment)',
+    re.IGNORECASE)
+DRAW_RX = re.compile(
+    r'draw (a|two|three|\d+) card|investigate|whenever .* draw|'
+    r'look at the top \d+ card|scry \d',
+    re.IGNORECASE)
+PROTECTION_RX = re.compile(
+    r'hexproof|indestructible|regenerate|shroud|ward|\bprotection\b|'
+    r'counter target spell|can\'t be countered',
+    re.IGNORECASE)
+WINCON_RX = re.compile(
+    r'players (lose|win) the game|you win the game|'
+    r'deal (infinite|combat) damage|\binfinite\b',
+    re.IGNORECASE)
+
+# Label -> compiled pattern, in priority order for tagging.
+ROLE_PATTERNS = [
+    ('Ramp',       RAMP_RX),
+    ('Removal',    REMOVAL_RX),
+    ('Card draw',  DRAW_RX),
+    ('Protection', PROTECTION_RX),
+    ('Win con',    WINCON_RX),
+]
+
+
+def _is_big_threat(type_line, cmc, power):
+    """A 6+ CMC creature with power 5+ counts as a win condition / threat."""
+    return ('Land' not in (type_line or '')
+            and int(cmc or 0) >= 6
+            and power is not None and str(power).lstrip('-').isdigit()
+            and int(power) >= 5)
+
+
+def role_tags(oracle, type_line=None, cmc=None, power=None, limit=3):
+    """Return up to `limit` role labels for a card based on its oracle text,
+    adding 'Threat' for big creatures. Used for suggestion-card chips."""
+    if not oracle:
+        oracle = ''
+    tags = [label for label, rx in ROLE_PATTERNS if rx.search(oracle)]
+    if _is_big_threat(type_line, cmc, power) and 'Win con' not in tags:
+        tags.append('Threat')
+    return tags[:limit] if limit else tags
+
+
+def health_score(oracle, type_line=None, cmc=None, power=None):
+    """0.0–1.0 score for how many health categories a card covers (saturates
+    at 2 categories = 1.0). Used for cut-candidate keep-scoring."""
+    if not oracle:
+        return 0.0
+    cats = sum(1 for _, rx in ROLE_PATTERNS if rx.search(oracle))
+    if _is_big_threat(type_line, cmc, power):
+        cats += 1
+    return min(cats / 2.0, 1.0)
+
+
 # ── Strategy definitions ──────────────────────────────────────────────────────
 
 STRATEGIES = {
@@ -225,39 +293,17 @@ def compute_health(rows, strategy_key, is_commander, deck_format=None):
     # Core pattern counters (same as before)
     _non_land = [r for r in rows if 'Land' not in (r.get('type_line') or '')]
 
-    def _count(pattern, source_rows=None):
-        rx = _re.compile(pattern, _re.IGNORECASE)
+    def _count(rx, source_rows=None):
         return sum(r['count'] for r in (source_rows or rows) if rx.search(r.get('oracle_text') or ''))
 
     core_counts = {
-        'Removal': _count(
-            r'destroy target|exile target|deals \d+ damage to (any target|target creature|each creature)|'
-            r'-\d+/-\d+|return target .* to (its owner|their owner)\'s hand|'
-            r'counter target (spell|creature|artifact|enchantment)'
-        ),
-        'Card draw': _count(
-            r'draw (a|two|three|\d+) card|investigate|whenever .* draw|'
-            r'look at the top \d+ card|scry \d'
-        ),
-        'Ramp': _count(
-            r'search your library for (a|up to \d+) (basic )?land|'
-            r'add \{[WUBRGC]\}|add (one|two|\d+) mana|'
-            r'add mana of any|untap target land',
-            _non_land
-        ),
-        'Protection': _count(
-            r'hexproof|indestructible|regenerate|shroud|ward|\bprotection\b|'
-            r'counter target spell|can\'t be countered'
-        ),
-        'Win cons': _count(
-            r'players (lose|win) the game|you win the game|'
-            r'deal (infinite|combat) damage|\binfinite\b'
-        ) + sum(
+        'Removal': _count(REMOVAL_RX),
+        'Card draw': _count(DRAW_RX),
+        'Ramp': _count(RAMP_RX, _non_land),
+        'Protection': _count(PROTECTION_RX),
+        'Win cons': _count(WINCON_RX) + sum(
             r['count'] for r in rows
-            if 'Land' not in (r.get('type_line') or '')
-            and int(r.get('cmc') or 0) >= 6
-            and str(r.get('power') or '').lstrip('-').isdigit()
-            and int(r.get('power')) >= 5
+            if _is_big_threat(r.get('type_line'), r.get('cmc'), r.get('power'))
         ),
         'Creatures': sum(
             r['count'] for r in rows

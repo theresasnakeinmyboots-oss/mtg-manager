@@ -14,29 +14,19 @@ Algorithm:
 Target deck size: 99 mainboard + 1 commander = 100.
 """
 import re
-from app.strategy import STRATEGIES, DEFAULT_STRATEGY
+from app.strategy import (STRATEGIES, DEFAULT_STRATEGY,
+                          RAMP_RX, REMOVAL_RX, DRAW_RX, PROTECTION_RX)
+from app.mtg_constants import BASIC_LANDS_LOWER, COLOR_BASIC
 
-# ── Category regexes (same as health checks + suggestion tags) ────────────────
+# ── Category regexes ──────────────────────────────────────────────────────────
+# The first four reuse the shared role patterns; the rest are quota-specific
+# labels matching the strategy health-check names this module fills against.
 
 _CAT_RX = [
-    ('Ramp',      re.compile(
-        r'search your library for (a|up to \d+) (basic )?land|'
-        r'add \{[WUBRGC]\}|add (one|two|\d+) mana|add mana of any|untap target land',
-        re.IGNORECASE)),
-    ('Removal',   re.compile(
-        r'destroy target|exile target|'
-        r'deals \d+ damage to (any target|target creature|each creature)|'
-        r'-\d+/-\d+|return target .* to (its owner|their owner)\'s hand|'
-        r'counter target (spell|creature|artifact|enchantment)',
-        re.IGNORECASE)),
-    ('Card draw', re.compile(
-        r'draw (a|two|three|\d+) card|investigate|whenever .* draw|'
-        r'look at the top \d+ card|scry \d',
-        re.IGNORECASE)),
-    ('Protection', re.compile(
-        r'hexproof|indestructible|regenerate|shroud|ward|\bprotection\b|'
-        r'counter target spell|can\'t be countered',
-        re.IGNORECASE)),
+    ('Ramp',       RAMP_RX),
+    ('Removal',    REMOVAL_RX),
+    ('Card draw',  DRAW_RX),
+    ('Protection', PROTECTION_RX),
     ('Token gen', re.compile(
         r'create[s]? \w+ [\w\s]+ token|put[s]? \w+ [\w\s]+ token|populate',
         re.IGNORECASE)),
@@ -57,13 +47,9 @@ _CAT_RX = [
         re.IGNORECASE)),
 ]
 
-BASIC_LAND_NAMES = {
-    'plains', 'island', 'swamp', 'mountain', 'forest',
-    'wastes', 'snow-covered plains', 'snow-covered island',
-    'snow-covered swamp', 'snow-covered mountain', 'snow-covered forest',
-}
-
-_COLOR_BASICS = {'W': 'Plains', 'U': 'Island', 'B': 'Swamp', 'R': 'Mountain', 'G': 'Forest'}
+# Aliases for backwards-compatible internal references
+BASIC_LAND_NAMES = BASIC_LANDS_LOWER
+_COLOR_BASICS = COLOR_BASIC
 
 
 def _card_cats(oracle, type_line):

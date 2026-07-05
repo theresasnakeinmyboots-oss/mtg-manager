@@ -1,5 +1,8 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify, abort
 from app.database import get_db
+from app.cards_repo import get_or_create_card
+from app.mtg_constants import BASIC_LANDS, BASIC_LANDS_LOWER
+from app.strategy import role_tags, health_score
 from datetime import datetime, timezone
 
 decks_bp = Blueprint('decks', __name__, url_prefix='/decks')
@@ -13,10 +16,6 @@ FORMAT_RULES = {
     'sealed':    {'min_main': 40, 'max_main': None, 'max_side': None, 'max_copies': None, 'singleton': False, 'commander': False},
 }
 
-BASIC_LANDS = {'Plains', 'Island', 'Swamp', 'Mountain', 'Forest',
-               'Wastes', 'Snow-Covered Plains', 'Snow-Covered Island',
-               'Snow-Covered Swamp', 'Snow-Covered Mountain', 'Snow-Covered Forest'}
-
 FORMAT_LABELS = {
     'standard': 'Standard', 'modern': 'Modern', 'pioneer': 'Pioneer',
     'legacy': 'Legacy', 'commander': 'Commander / EDH', 'sealed': 'Sealed',
@@ -25,6 +24,26 @@ FORMAT_LABELS = {
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def resolve_commander(db, deck_id):
+    """Return the deck's commander row (name, scryfall_id) or None.
+
+    Prefers whatever is on the commander board; if that's empty, falls back to
+    the highest-CMC Legendary Creature in the deck (alphabetical tiebreak).
+    """
+    cmd = db.execute(
+        "SELECT dc.name, dc.scryfall_id FROM deck_cards dc "
+        "WHERE dc.deck_id=? AND dc.board='commander' LIMIT 1", [deck_id]
+    ).fetchone()
+    if cmd:
+        return cmd
+    return db.execute(
+        "SELECT dc.name, dc.scryfall_id FROM deck_cards dc "
+        "LEFT JOIN scryfall_bulk b ON dc.scryfall_id = b.scryfall_id "
+        "WHERE dc.deck_id=? AND b.type_line LIKE '%Legendary%Creature%' "
+        "ORDER BY b.cmc DESC, dc.name LIMIT 1", [deck_id]
+    ).fetchone()
 
 
 def _validate_deck(cards, fmt):
@@ -643,31 +662,16 @@ def detail(deck_id):
                 if nl not in edhrec_lookup or ec['synergy'] > edhrec_lookup[nl]:
                     edhrec_lookup[nl] = ec['synergy']
 
-            import re as _cre2
-            _rem2  = _cre2.compile(r'destroy target|exile target|deals \d+ damage to (any target|target creature|each creature)|-\d+/-\d+|return target .* to (its owner|their owner)\'s hand|counter target (spell|creature|artifact|enchantment)', _cre2.IGNORECASE)
-            _drw2  = _cre2.compile(r'draw (a|two|three|\d+) card|investigate|whenever .* draw|look at the top \d+ card|scry \d', _cre2.IGNORECASE)
-            _rmp2  = _cre2.compile(r'search your library for (a|up to \d+) (basic )?land|add \{[WUBRGC]\}|add (one|two|\d+) mana|add mana of any|untap target land', _cre2.IGNORECASE)
-            _prt2  = _cre2.compile(r'hexproof|indestructible|regenerate|shroud|ward|\bprotection\b|counter target spell|can\'t be countered', _cre2.IGNORECASE)
-            _wcn2  = _cre2.compile(r'players (lose|win) the game|you win the game|\binfinite\b', _cre2.IGNORECASE)
-            BASICS = {'plains','island','swamp','mountain','forest',
-                      'wastes','snow-covered plains','snow-covered island',
-                      'snow-covered swamp','snow-covered mountain','snow-covered forest'}
             cmd_name_lower = active_commander['name'].lower()
             for r in main_rows + cmd_rows:
                 nl = r['name'].lower()
-                if nl in BASICS or nl == cmd_name_lower:
+                if nl in BASIC_LANDS_LOWER or nl == cmd_name_lower:
                     continue
                 if 'Land' in (r['type_line'] or '') and 'Creature' not in (r['type_line'] or ''):
                     continue
                 raw_syn = edhrec_lookup.get(nl)
                 syn_c = ((raw_syn + 1.0) / 2.0) if raw_syn is not None else 0.2
-                oracle = r['oracle_text'] or ''
-                cats = sum([
-                    bool(_rem2.search(oracle)), bool(_drw2.search(oracle)),
-                    bool(_rmp2.search(oracle)), bool(_prt2.search(oracle)),
-                    bool(_wcn2.search(oracle)),
-                ])
-                health_c = min(cats / 2.0, 1.0)
+                health_c = health_score(r['oracle_text'], r['type_line'], r['cmc'], r['power'])
                 keep_score = 0.6 * syn_c + 0.4 * health_c
                 cut_candidates.append({
                     'scryfall_id':      r['scryfall_id'],
@@ -708,26 +712,21 @@ def detail(deck_id):
             ''', [_slug2_val]).fetchall()
 
             import re as _srx
-            _sugg_tags = [
-                ('Ramp',       _srx.compile(r'search your library for (a|up to \d+) (basic )?land|add \{[WUBRGC]\}|add (one|two|\d+) mana|add mana of any|untap target land', _srx.I)),
-                ('Removal',    _srx.compile(r'destroy target|exile target|deals \d+ damage to (any target|target creature|each creature)|-\d+/-\d+|return target .* to (its owner|their owner)\'s hand|counter target (spell|creature|artifact|enchantment)', _srx.I)),
-                ('Card draw',  _srx.compile(r'draw (a|two|three|\d+) card|investigate|whenever .* draw|look at the top \d+ card|scry \d', _srx.I)),
-                ('Protection', _srx.compile(r'hexproof|indestructible|regenerate|shroud|ward|\bprotection\b|counter target spell|can\'t be countered', _srx.I)),
-                ('Tokens',     _srx.compile(r'create[s]? \w+ [\w\s]+ token|put[s]? \w+ [\w\s]+ token|populate', _srx.I)),
-                ('Tutor',      _srx.compile(r'search your library for .* card', _srx.I)),
-                ('Life gain',  _srx.compile(r'you gain \d+ life|gains? \d+ life|lifelink', _srx.I)),
-                ('Win con',    _srx.compile(r'you win the game|players lose the game|\binfinite\b', _srx.I)),
+            # Core role patterns are shared (strategy.ROLE_PATTERNS); these are the
+            # extra suggestion-only tags layered on top.
+            _sugg_extra_tags = [
+                ('Tokens',    _srx.compile(r'create[s]? \w+ [\w\s]+ token|put[s]? \w+ [\w\s]+ token|populate', _srx.I)),
+                ('Tutor',     _srx.compile(r'search your library for .* card', _srx.I)),
+                ('Life gain', _srx.compile(r'you gain \d+ life|gains? \d+ life|lifelink', _srx.I)),
             ]
 
             def _sugg_role_tags(oracle, type_line, cmc, power):
                 if not oracle:
                     return []
-                tags = [label for label, rx in _sugg_tags if rx.search(oracle)]
-                if ('Land' not in (type_line or '') and int(cmc or 0) >= 6
-                        and power and str(power).lstrip('-').isdigit()
-                        and int(power) >= 5):
-                    if 'Win con' not in tags:
-                        tags.append('Threat')
+                # Core tags (Ramp/Removal/Card draw/Protection/Win con + Threat)
+                tags = role_tags(oracle, type_line, cmc, power, limit=None)
+                # Layer in suggestion-only extras
+                tags += [label for label, rx in _sugg_extra_tags if rx.search(oracle)]
                 return tags[:3]  # cap at 3 to keep the row tidy
 
             _type_order = ['Commander', 'Creature', 'Planeswalker', 'Instant', 'Sorcery',
@@ -1026,30 +1025,11 @@ def reconcile_use_deck_printing(deck_id):
         db.close()
         return jsonify(error='Not found'), 404
 
-    target_card = db.execute('SELECT id FROM cards WHERE scryfall_id = ?', [dc['scryfall_id']]).fetchone()
-    if target_card:
-        target_card_id = target_card['id']
-    else:
-        bulk = db.execute('SELECT * FROM scryfall_bulk WHERE scryfall_id = ?', [dc['scryfall_id']]).fetchone()
-        if not bulk:
-            db.close()
-            return jsonify(error='Printing not found in bulk data'), 404
-        cursor = db.execute('''
-            INSERT INTO cards (scryfall_id, name, set_code, set_name, collector_number,
-                mana_cost, cmc, colors, color_identity, type_line, oracle_text, flavor_text,
-                power, toughness, rarity, legalities, image_uri_normal, image_uri_small,
-                artist, enriched_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
-        ''', (bulk['scryfall_id'], bulk['name'], bulk['set_code'], bulk['set_name'],
-              bulk['collector_number'], bulk['mana_cost'], bulk['cmc'], bulk['colors'],
-              bulk['color_identity'], bulk['type_line'], bulk['oracle_text'], bulk['flavor_text'],
-              bulk['power'], bulk['toughness'], bulk['rarity'], bulk['legalities'],
-              bulk['image_uri_normal'], bulk['image_uri_small'], bulk['artist']))
-        target_card_id = cursor.lastrowid
+    target_card_id, bulk_edition = get_or_create_card(db, dc['scryfall_id'])
+    if target_card_id is None:
+        db.close()
+        return jsonify(error='Printing not found in bulk data'), 404
 
-    bulk_edition = db.execute(
-        'SELECT set_name, collector_number FROM scryfall_bulk WHERE scryfall_id = ?', [dc['scryfall_id']]
-    ).fetchone()
     new_edition = bulk_edition['set_name'] if bulk_edition else coll_row['edition']
     new_card_number = bulk_edition['collector_number'] if bulk_edition else coll_row['card_number']
 
@@ -1264,19 +1244,8 @@ def suggestions(deck_id):
         db.close()
         abort(404)
 
-    # Active commander = whatever is on the commander board.
-    # Fall back to first Legendary Creature in mainboard if commander board is empty.
-    commander = db.execute(
-        "SELECT dc.name, dc.scryfall_id FROM deck_cards dc "
-        "WHERE dc.deck_id=? AND dc.board='commander' LIMIT 1", [deck_id]
-    ).fetchone()
-    if not commander:
-        commander = db.execute(
-            "SELECT dc.name, dc.scryfall_id FROM deck_cards dc "
-            "LEFT JOIN scryfall_bulk b ON dc.scryfall_id = b.scryfall_id "
-            "WHERE dc.deck_id=? AND b.type_line LIKE '%Legendary%Creature%' "
-            "ORDER BY b.cmc DESC, dc.name LIMIT 1", [deck_id]
-        ).fetchone()
+    # Active commander = whatever is on the commander board, else best guess.
+    commander = resolve_commander(db, deck_id)
 
     # Cards already in the deck (by name, lowercase) for deduplication
     deck_card_names = set(
@@ -1368,7 +1337,6 @@ def suggestions(deck_id):
         # ── Cut candidates: cards already in deck with low keep score ──
         # Score = 0.6 * synergy_component + 0.4 * health_component
         # Lower score = weaker card = better cut candidate
-        import re as _cre
         edhrec_slug = edhrec_data['slug']
 
         # Build EDHREC lookup: card name (lower) → synergy score
@@ -1380,30 +1348,6 @@ def suggestions(deck_id):
             if name_lower not in edhrec_lookup or ec['synergy'] > edhrec_lookup[name_lower]:
                 edhrec_lookup[name_lower] = ec['synergy']
 
-        # Health regexes (same as detail view)
-        _removal_rx    = _cre.compile(r'destroy target|exile target|deals \d+ damage to (any target|target creature|each creature)|-\d+/-\d+|return target .* to (its owner|their owner)\'s hand|counter target (spell|creature|artifact|enchantment)', _cre.IGNORECASE)
-        _draw_rx       = _cre.compile(r'draw (a|two|three|\d+) card|investigate|whenever .* draw|look at the top \d+ card|scry \d', _cre.IGNORECASE)
-        _ramp_rx       = _cre.compile(r'search your library for (a|up to \d+) (basic )?land|add \{[WUBRGC]\}|add (one|two|\d+) mana|add mana of any|untap target land', _cre.IGNORECASE)
-        _protect_rx    = _cre.compile(r'hexproof|indestructible|regenerate|shroud|ward|\bprotection\b|counter target spell|can\'t be countered', _cre.IGNORECASE)
-        _wincon_rx     = _cre.compile(r'players (lose|win) the game|you win the game|deal (infinite|combat) damage|\binfinite\b', _cre.IGNORECASE)
-
-        def _health_score(oracle, type_line, cmc, power):
-            """Return 0.0–1.0 based on how many health categories a card covers."""
-            if not oracle:
-                return 0.0
-            cats = 0
-            if _removal_rx.search(oracle):  cats += 1
-            if _draw_rx.search(oracle):     cats += 1
-            if _ramp_rx.search(oracle):     cats += 1
-            if _protect_rx.search(oracle):  cats += 1
-            if _wincon_rx.search(oracle):   cats += 1
-            # Big threats count as win con
-            if ('Land' not in (type_line or '') and int(cmc or 0) >= 6
-                    and power and str(power).lstrip('-').isdigit()
-                    and int(power) >= 5):
-                cats += 1
-            return min(cats / 2.0, 1.0)  # saturates at 2 categories = 1.0
-
         deck_cards_full = db.execute('''
             SELECT dc.id, dc.scryfall_id, dc.name, dc.count, dc.board,
                    b.type_line, b.mana_cost, b.image_uri_normal,
@@ -1413,15 +1357,12 @@ def suggestions(deck_id):
             WHERE dc.deck_id = ?
         ''', [deck_id]).fetchall()
 
-        BASIC_LAND_NAMES = {'plains','island','swamp','mountain','forest',
-                            'wastes','snow-covered plains','snow-covered island',
-                            'snow-covered swamp','snow-covered mountain','snow-covered forest'}
         commander_name_lower = commander['name'].lower() if commander else ''
 
         for dc in deck_cards_full:
             name_lower = dc['name'].lower()
             # Skip basics and the commander itself
-            if name_lower in BASIC_LAND_NAMES or name_lower == commander_name_lower:
+            if name_lower in BASIC_LANDS_LOWER or name_lower == commander_name_lower:
                 continue
             # Skip pure lands (no oracle synergy signal)
             if 'Land' in (dc['type_line'] or '') and 'Creature' not in (dc['type_line'] or ''):
@@ -1437,7 +1378,7 @@ def suggestions(deck_id):
                 syn_component = 0.2
                 in_edhrec = False
 
-            health_component = _health_score(
+            health_component = health_score(
                 dc['oracle_text'], dc['type_line'], dc['cmc'], dc['power']
             )
 
@@ -1496,17 +1437,7 @@ def auto_fill_preview(deck_id):
         abort(404)
 
     # Resolve commander
-    cmd = db.execute(
-        "SELECT dc.name, dc.scryfall_id FROM deck_cards dc "
-        "WHERE dc.deck_id=? AND dc.board='commander' LIMIT 1", [deck_id]
-    ).fetchone()
-    if not cmd:
-        cmd = db.execute(
-            "SELECT dc.name, dc.scryfall_id FROM deck_cards dc "
-            "LEFT JOIN scryfall_bulk b ON dc.scryfall_id=b.scryfall_id "
-            "WHERE dc.deck_id=? AND b.type_line LIKE '%Legendary%Creature%' "
-            "ORDER BY b.cmc DESC, dc.name LIMIT 1", [deck_id]
-        ).fetchone()
+    cmd = resolve_commander(db, deck_id)
 
     if not cmd:
         db.close()

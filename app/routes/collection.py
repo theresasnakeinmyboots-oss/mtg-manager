@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, request, jsonify, Response, send_file, redirect, url_for
 from app.database import get_db
+from app.cards_repo import get_or_create_card
 from app.scryfall import ScryfallClient
 from app.importer import import_csv
 from werkzeug.utils import secure_filename
@@ -530,27 +531,10 @@ def switch_printing(row_id):
         return jsonify({'error': 'Row not found'}), 404
 
     # Get or create the cards row for the target printing
-    target_card = db.execute('SELECT id FROM cards WHERE scryfall_id = ?', (scryfall_id,)).fetchone()
-    if target_card:
-        target_card_id = target_card['id']
-    else:
-        # Copy from scryfall_bulk into cards
-        bulk = db.execute('SELECT * FROM scryfall_bulk WHERE scryfall_id = ?', (scryfall_id,)).fetchone()
-        if not bulk:
-            db.close()
-            return jsonify({'error': 'Printing not found in bulk data'}), 404
-        cursor = db.execute('''
-            INSERT INTO cards (scryfall_id, name, set_code, set_name, collector_number,
-                mana_cost, cmc, colors, color_identity, type_line, oracle_text, flavor_text,
-                power, toughness, rarity, legalities, image_uri_normal, image_uri_small,
-                artist, enriched_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
-        ''', (bulk['scryfall_id'], bulk['name'], bulk['set_code'], bulk['set_name'],
-              bulk['collector_number'], bulk['mana_cost'], bulk['cmc'], bulk['colors'],
-              bulk['color_identity'], bulk['type_line'], bulk['oracle_text'], bulk['flavor_text'],
-              bulk['power'], bulk['toughness'], bulk['rarity'], bulk['legalities'],
-              bulk['image_uri_normal'], bulk['image_uri_small'], bulk['artist']))
-        target_card_id = cursor.lastrowid
+    target_card_id, _bulk = get_or_create_card(db, scryfall_id)
+    if target_card_id is None:
+        db.close()
+        return jsonify({'error': 'Printing not found in bulk data'}), 404
 
     # Get the new printing's set name to update edition
     bulk_edition = db.execute(
@@ -612,22 +596,7 @@ def quick_add():
             return jsonify(error='Collection not found'), 404
 
     # Get or create the cards row
-    card_row = db.execute('SELECT id FROM cards WHERE scryfall_id = ?', [scryfall_id]).fetchone()
-    if card_row:
-        card_id = card_row['id']
-    else:
-        cur = db.execute('''
-            INSERT INTO cards (scryfall_id, name, set_code, set_name, collector_number,
-                mana_cost, cmc, colors, color_identity, type_line, oracle_text, flavor_text,
-                power, toughness, rarity, legalities, image_uri_normal, image_uri_small,
-                artist, enriched_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
-        ''', (bulk['scryfall_id'], bulk['name'], bulk['set_code'], bulk['set_name'],
-              bulk['collector_number'], bulk['mana_cost'], bulk['cmc'], bulk['colors'],
-              bulk['color_identity'], bulk['type_line'], bulk['oracle_text'], bulk['flavor_text'],
-              bulk['power'], bulk['toughness'], bulk['rarity'], bulk['legalities'],
-              bulk['image_uri_normal'], bulk['image_uri_small'], bulk['artist']))
-        card_id = cur.lastrowid
+    card_id, _bulk = get_or_create_card(db, scryfall_id)
 
     # Increment existing row or insert a new one
     existing = db.execute(
