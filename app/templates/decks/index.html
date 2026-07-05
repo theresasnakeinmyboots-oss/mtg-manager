@@ -17,7 +17,10 @@
         {% for deck in decks %}
         <div class="deck-card-wrap">
             <a href="/decks/{{ deck.id }}" class="deck-card">
-                <div class="deck-card-format">{{ format_labels.get(deck.format, deck.format) }}</div>
+                <div class="deck-card-format">
+                    {{ format_labels.get(deck.format, deck.format) }}
+                    <span class="deck-kind-badge deck-kind-{{ deck.kind }}">{{ '🃏 Physical' if deck.kind == 'physical' else '📋 List' }}</span>
+                </div>
                 <div class="deck-card-name">{{ deck.name }}</div>
                 <div class="deck-card-meta">
                     <span>{{ deck.total_cards }} cards</span>

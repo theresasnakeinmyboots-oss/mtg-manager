@@ -11,9 +11,20 @@
             <h1 id="deckNameHeading" class="deck-name-editable" title="Click to rename">{{ deck.name }}</h1>
             <input id="deckNameInput" class="deck-name-input" type="text" value="{{ deck.name | e }}" style="display:none;" maxlength="120">
             <span class="deck-format-badge">{{ format_label }}</span>
+            <button id="deckKindBadge" class="deck-kind-badge deck-kind-{{ deck.kind }}"
+                    title="Click to switch between a theoretical list and a physical deck built from owned cards">
+                {{ '🃏 Physical' if deck.kind == 'physical' else '📋 List' }}
+            </button>
         </div>
         <div class="deck-detail-actions">
             <span class="deck-stat">{{ total_count }} cards · {{ owned_count }}/{{ total_count }} owned</span>
+            {% if allocation %}
+            <a href="/decks/{{ deck.id }}/allocations"
+               class="deck-stat deck-alloc-badge {{ 'complete' if allocation.allocated >= allocation.total else 'incomplete' }}"
+               title="How many copies are backed by specific cards in your collection">
+                {{ allocation.allocated }}/{{ allocation.total }} allocated
+            </a>
+            {% endif %}
             {% if printing_mismatch_count %}
             <a href="/decks/{{ deck.id }}/reconcile" class="deck-stat deck-mismatch-badge" title="Cards owned under a different printing than the deck lists">
                 ⚠ {{ printing_mismatch_count }} printing mismatch{{ 'es' if printing_mismatch_count != 1 else '' }}
@@ -1247,5 +1258,20 @@ document.querySelectorAll('.combo-expand-btn').forEach(btn => {
         hideTimer = setTimeout(() => { zoom.style.display = 'none'; }, 80);
     });
 })();
+
+// ── Deck kind toggle (list ⇄ physical) ─────────────────────────────
+document.getElementById('deckKindBadge').addEventListener('click', async () => {
+    const current = {{ 'true' if deck.kind == 'physical' else 'false' }};
+    const next = current ? 'list' : 'physical';
+    if (current && !confirm('Convert to a list deck? This releases all allocated cards back to your collection.')) return;
+    const res = await fetch(`/decks/{{ deck.id }}/set-kind`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: next })
+    });
+    const data = await res.json();
+    if (data.ok) location.reload();
+    else alert(data.error || 'Failed to change deck type');
+});
 </script>
 {% endblock %}

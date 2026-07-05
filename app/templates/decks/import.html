@@ -25,6 +25,17 @@
                 {% endfor %}
             </select>
         </label>
+        <fieldset class="deck-kind-choice">
+            <legend>Deck type</legend>
+            <label class="deck-kind-option">
+                <input type="radio" name="kind" value="list" {% if form.get('kind','list') != 'physical' %}checked{% endif %}>
+                <span><strong>List</strong> — a theoretical decklist; cards are tracked by name, you don't need to own them</span>
+            </label>
+            <label class="deck-kind-option">
+                <input type="radio" name="kind" value="physical" {% if form.get('kind') == 'physical' %}checked{% endif %}>
+                <span><strong>Physical</strong> — built from specific owned cards, stored separately from your collection</span>
+            </label>
+        </fieldset>
         <label>
             Description <span style="font-weight:400;color:var(--text-secondary);">(optional)</span>
             <textarea name="description" rows="2">{{ form.get('description','') }}</textarea>

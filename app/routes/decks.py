@@ -87,10 +87,12 @@ def _deck_with_ownership(db, deck_id):
         SELECT
             dc.id, dc.scryfall_id, dc.name, dc.count, dc.board, dc.added_at,
             COALESCE((
+                -- Owned copies of this card as a game object: any printing with the
+                -- same oracle_id counts. Replaces the old LOWER(name) string match.
                 SELECT SUM(c2.count)
                 FROM collection c2
-                JOIN cards k2 ON c2.card_id = k2.id
-                WHERE LOWER(k2.name) = LOWER(dc.name)
+                JOIN scryfall_bulk cb ON c2.scryfall_id = cb.scryfall_id
+                WHERE cb.oracle_id = b.oracle_id
             ), 0) AS owned_count,
             (
                 -- Only link to a collection row when it's the exact printing the deck
@@ -102,6 +104,7 @@ def _deck_with_ownership(db, deck_id):
                 LEFT JOIN cards k3 ON c3.card_id = k3.id
                 WHERE c3.scryfall_id = dc.scryfall_id OR k3.scryfall_id = dc.scryfall_id
             ) AS collection_row_id,
+            b.oracle_id,
             b.image_uri_normal, b.type_line, b.mana_cost, b.rarity,
             b.colors, b.cmc, b.power, b.toughness, b.color_identity, b.oracle_text,
             b.set_name, b.set_code, b.collector_number
@@ -181,6 +184,9 @@ def new():
         name   = request.form.get('name', '').strip()
         fmt    = request.form.get('format', '').strip()
         desc   = request.form.get('description', '').strip()
+        kind   = request.form.get('kind', 'list')
+        if kind not in ('list', 'physical'):
+            kind = 'list'
         sealed_collection_id = request.form.get('sealed_collection_id', '').strip() or None
         if not name or fmt not in FORMAT_RULES:
             db.close()
@@ -190,8 +196,8 @@ def new():
                                    error='Name and a valid format are required.',
                                    form=request.form)
         cur = db.execute(
-            'INSERT INTO decks (name, format, description, created_at) VALUES (?,?,?,?)',
-            [name, fmt, desc, _now()]
+            'INSERT INTO decks (name, format, description, kind, created_at) VALUES (?,?,?,?,?)',
+            [name, fmt, desc, kind, _now()]
         )
         deck_id = cur.lastrowid
 
@@ -234,6 +240,9 @@ def import_deck():
         fmt    = request.form.get('format', '').strip()
         desc   = request.form.get('description', '').strip()
         text   = request.form.get('decklist', '').strip()
+        kind   = request.form.get('kind', 'list')
+        if kind not in ('list', 'physical'):
+            kind = 'list'
         if not name or fmt not in FORMAT_RULES or not text:
             return render_template('decks/import.html',
                                    formats=FORMAT_LABELS,
@@ -244,8 +253,8 @@ def import_deck():
         entries, warnings = resolve_cards(db, parsed)
 
         cur = db.execute(
-            'INSERT INTO decks (name, format, description, created_at) VALUES (?,?,?,?)',
-            [name, fmt, desc, _now()]
+            'INSERT INTO decks (name, format, description, kind, created_at) VALUES (?,?,?,?,?)',
+            [name, fmt, desc, kind, _now()]
         )
         deck_id = cur.lastrowid
         for entry in entries:
@@ -273,6 +282,9 @@ def import_dlens_deck():
         name  = request.form.get('name', '').strip()
         fmt   = request.form.get('format', '').strip()
         desc  = request.form.get('description', '').strip()
+        kind  = request.form.get('kind', 'list')
+        if kind not in ('list', 'physical'):
+            kind = 'list'
         board = request.form.get('board', 'main')
         if board not in ('main', 'side', 'commander'):
             board = 'main'
@@ -296,8 +308,8 @@ def import_dlens_deck():
             db = get_db()
             entries, warnings = _resolve_dlens_for_deck(tmp.name, str(datadb_path), db)
             cur = db.execute(
-                'INSERT INTO decks (name, format, description, created_at) VALUES (?,?,?,?)',
-                [name, fmt, desc, _now()]
+                'INSERT INTO decks (name, format, description, kind, created_at) VALUES (?,?,?,?,?)',
+                [name, fmt, desc, kind, _now()]
             )
             deck_id = cur.lastrowid
             for entry in entries:
@@ -382,9 +394,13 @@ def detail(deck_id):
     side_rows = [r for r in rows if r['board'] == 'side']
     cmd_rows  = [r for r in rows if r['board'] == 'commander']
 
-    printing_mismatch_count = sum(
-        1 for r in rows if r['owned_count'] > 0 and not r['collection_row_id']
-    )
+    # Printing mismatches only matter for physical decks — a list deck doesn't
+    # claim you own any particular printing, so there's nothing to reconcile.
+    printing_mismatch_count = 0
+    if deck['kind'] == 'physical':
+        printing_mismatch_count = sum(
+            1 for r in rows if r['owned_count'] > 0 and not r['collection_row_id']
+        )
 
     # If everything landed in the commander board (bad import), treat them as mainboard
     # so type grouping and charts still work. Surface a warning instead of a blank page.
@@ -638,6 +654,19 @@ def detail(deck_id):
                     db.execute('SELECT check_name FROM deck_health_mutes WHERE deck_id=?',
                                [deck_id]).fetchall()}
 
+    # Allocation summary (physical decks): how many copies are backed by
+    # specific collection rows vs. the deck's total card count.
+    allocation = None
+    if deck['kind'] == 'physical':
+        deck_total = sum(r['count'] for r in rows)
+        allocated = db.execute('''
+            SELECT COALESCE(SUM(a.qty), 0)
+            FROM deck_allocations a
+            JOIN deck_cards dc ON a.deck_card_id = dc.id
+            WHERE dc.deck_id = ?
+        ''', [deck_id]).fetchone()[0]
+        allocation = {'allocated': allocated, 'total': deck_total}
+
     # Load or run strategy detection
     last_detection = db.execute(
         'SELECT * FROM deck_strategy_feedback WHERE deck_id=? ORDER BY detected_at DESC LIMIT 1',
@@ -814,6 +843,7 @@ def detail(deck_id):
                            total_count=total_count,
                            owned_count=owned_count,
                            printing_mismatch_count=printing_mismatch_count,
+                           allocation=allocation,
                            errors=errors,
                            format_label=FORMAT_LABELS.get(deck['format'], deck['format']),
                            chart_curve=chart_curve,
@@ -921,12 +951,32 @@ def set_count(deck_id):
     row_id = int(data.get('id', 0))
     count  = int(data.get('count', 1))
     if count < 1:
+        db.execute('DELETE FROM deck_allocations WHERE deck_card_id=?', [row_id])
         db.execute('DELETE FROM deck_cards WHERE id=? AND deck_id=?', [row_id, deck_id])
     else:
         db.execute('UPDATE deck_cards SET count=? WHERE id=? AND deck_id=?', [count, row_id, deck_id])
+        _trim_allocations(db, row_id, count)
     db.commit()
     db.close()
     return jsonify(ok=True)
+
+
+def _trim_allocations(db, deck_card_id, new_count):
+    """Reduce a deck card's allocations so their total never exceeds its count."""
+    allocs = db.execute(
+        'SELECT id, qty FROM deck_allocations WHERE deck_card_id=? ORDER BY id DESC',
+        [deck_card_id]
+    ).fetchall()
+    excess = sum(a['qty'] for a in allocs) - new_count
+    for a in allocs:
+        if excess <= 0:
+            break
+        take = min(a['qty'], excess)
+        if take == a['qty']:
+            db.execute('DELETE FROM deck_allocations WHERE id=?', [a['id']])
+        else:
+            db.execute('UPDATE deck_allocations SET qty=qty-? WHERE id=?', [take, a['id']])
+        excess -= take
 
 
 # ── Remove a card ─────────────────────────────────────────────────────────────
@@ -936,6 +986,7 @@ def remove_card(deck_id):
     db = get_db()
     data   = request.get_json(force=True)
     row_id = int(data.get('id', 0))
+    db.execute('DELETE FROM deck_allocations WHERE deck_card_id=?', [row_id])
     db.execute('DELETE FROM deck_cards WHERE id=? AND deck_id=?', [row_id, deck_id])
     db.commit()
     db.close()
@@ -989,15 +1040,14 @@ def reconcile(deck_id):
             continue
 
         owned_printings = db.execute('''
-            SELECT c.id as collection_row_id, COALESCE(c.scryfall_id, k.scryfall_id) as scryfall_id,
+            SELECT c.id as collection_row_id, c.scryfall_id,
                    c.count, c.foil, c.condition,
                    b.set_name, b.collector_number, b.image_uri_normal
             FROM collection c
-            JOIN cards k ON c.card_id = k.id
-            LEFT JOIN scryfall_bulk b ON COALESCE(c.scryfall_id, k.scryfall_id) = b.scryfall_id
-            WHERE LOWER(k.name) = LOWER(?)
+            JOIN scryfall_bulk b ON c.scryfall_id = b.scryfall_id
+            WHERE b.oracle_id = (SELECT oracle_id FROM scryfall_bulk WHERE scryfall_id = ?)
             ORDER BY b.set_name
-        ''', [dc['name']]).fetchall()
+        ''', [dc['scryfall_id']]).fetchall()
 
         if owned_printings:
             mismatches.append({
@@ -1063,6 +1113,156 @@ def reconcile_use_collection_printing(deck_id):
     return jsonify(success=True)
 
 
+# ── Physical deck allocations ─────────────────────────────────────────────────
+# A physical deck is backed by specific collection rows. Allocations record
+# which owned copies are in the deck box, so the same physical card can never
+# back two decks and the collection knows where its cards live.
+
+@decks_bp.route('/<int:deck_id>/set-kind', methods=['POST'])
+def set_kind(deck_id):
+    kind = (request.get_json(force=True).get('kind') or '').strip()
+    if kind not in ('list', 'physical'):
+        return jsonify(error='kind must be list or physical'), 400
+    db = get_db()
+    if not db.execute('SELECT 1 FROM decks WHERE id=?', [deck_id]).fetchone():
+        db.close()
+        return jsonify(error='Deck not found'), 404
+    db.execute('UPDATE decks SET kind=? WHERE id=?', [kind, deck_id])
+    if kind == 'list':
+        # A list deck reserves no physical cards — release them all.
+        db.execute('''DELETE FROM deck_allocations WHERE deck_card_id IN
+                      (SELECT id FROM deck_cards WHERE deck_id=?)''', [deck_id])
+    db.commit()
+    db.close()
+    return jsonify(ok=True, kind=kind)
+
+
+@decks_bp.route('/<int:deck_id>/allocations')
+def allocations(deck_id):
+    db = get_db()
+    deck = db.execute('SELECT * FROM decks WHERE id=?', [deck_id]).fetchone()
+    if not deck:
+        db.close()
+        abort(404)
+
+    deck_cards = db.execute('''
+        SELECT dc.id, dc.name, dc.count, dc.board, dc.scryfall_id,
+               b.set_name, b.collector_number, b.image_uri_normal
+        FROM deck_cards dc
+        LEFT JOIN scryfall_bulk b ON dc.scryfall_id = b.scryfall_id
+        WHERE dc.deck_id = ?
+        ORDER BY dc.board, dc.name
+    ''', [deck_id]).fetchall()
+
+    alloc_rows = db.execute('''
+        SELECT a.deck_card_id, a.qty, a.collection_row_id,
+               c.id AS coll_id, c.condition, c.foil, c.scryfall_id AS coll_scryfall_id,
+               co.name AS collection_name,
+               cb.set_name AS coll_set_name, cb.collector_number AS coll_collector_number
+        FROM deck_allocations a
+        JOIN deck_cards dc ON a.deck_card_id = dc.id
+        LEFT JOIN collection c ON a.collection_row_id = c.id
+        LEFT JOIN collections co ON c.collection_id = co.id
+        LEFT JOIN scryfall_bulk cb ON c.scryfall_id = cb.scryfall_id
+        WHERE dc.deck_id = ?
+    ''', [deck_id]).fetchall()
+    db.close()
+
+    allocs_by_card = {}
+    for a in alloc_rows:
+        allocs_by_card.setdefault(a['deck_card_id'], []).append(dict(a))
+
+    cards = []
+    fully = partial = missing = broken = 0
+    for dc in deck_cards:
+        allocs = allocs_by_card.get(dc['id'], [])
+        allocated = sum(a['qty'] for a in allocs if a['coll_id'] is not None)
+        has_broken = any(a['coll_id'] is None for a in allocs)
+        if has_broken:
+            broken += 1
+        if allocated >= dc['count']:
+            fully += 1
+        elif allocated > 0:
+            partial += 1
+        else:
+            missing += 1
+        cards.append({
+            **dict(dc),
+            'allocs': [a for a in allocs if a['coll_id'] is not None],
+            'allocated': allocated,
+            'short': max(dc['count'] - allocated, 0),
+            'has_broken': has_broken,
+        })
+
+    return render_template('decks/allocations.html',
+                           deck=deck, cards=cards,
+                           summary={'fully': fully, 'partial': partial,
+                                    'missing': missing, 'broken': broken},
+                           format_label=FORMAT_LABELS.get(deck['format'], deck['format']))
+
+
+@decks_bp.route('/<int:deck_id>/allocate', methods=['POST'])
+def allocate(deck_id):
+    """Auto-allocate: back each deck card with owned collection rows sharing its
+    oracle_id, preferring the exact printing. Copies already allocated to OTHER
+    physical decks are off-limits. Clears and rebuilds this deck's allocations."""
+    db = get_db()
+    deck = db.execute('SELECT * FROM decks WHERE id=?', [deck_id]).fetchone()
+    if not deck:
+        db.close()
+        abort(404)
+    if deck['kind'] != 'physical':
+        db.close()
+        return jsonify(error='Only physical decks can be allocated'), 400
+
+    db.execute('''DELETE FROM deck_allocations WHERE deck_card_id IN
+                  (SELECT id FROM deck_cards WHERE deck_id=?)''', [deck_id])
+
+    # Copies claimed by other physical decks, per collection row
+    taken = {r['collection_row_id']: r['qty'] for r in db.execute('''
+        SELECT a.collection_row_id, SUM(a.qty) AS qty
+        FROM deck_allocations a
+        JOIN deck_cards dc ON a.deck_card_id = dc.id
+        JOIN decks d ON dc.deck_id = d.id
+        WHERE d.kind = 'physical'
+        GROUP BY a.collection_row_id
+    ''').fetchall()}
+
+    deck_cards = db.execute(
+        'SELECT id, scryfall_id, count FROM deck_cards WHERE deck_id=? ORDER BY board, name',
+        [deck_id]
+    ).fetchall()
+
+    for dc in deck_cards:
+        need = dc['count']
+        # Owned rows of the same game object, exact printing first (staging excluded)
+        candidates = db.execute('''
+            SELECT c.id, c.count, c.scryfall_id
+            FROM collection c
+            JOIN collections co ON c.collection_id = co.id AND co.is_staging = 0
+            JOIN scryfall_bulk cb ON c.scryfall_id = cb.scryfall_id
+            WHERE cb.oracle_id = (SELECT oracle_id FROM scryfall_bulk WHERE scryfall_id = ?)
+            ORDER BY (c.scryfall_id = ?) DESC, c.count DESC, c.id
+        ''', [dc['scryfall_id'], dc['scryfall_id']]).fetchall()
+        for cand in candidates:
+            if need <= 0:
+                break
+            avail = cand['count'] - taken.get(cand['id'], 0)
+            if avail <= 0:
+                continue
+            take = min(need, avail)
+            db.execute(
+                'INSERT INTO deck_allocations (deck_card_id, collection_row_id, qty) VALUES (?,?,?)',
+                [dc['id'], cand['id'], take]
+            )
+            taken[cand['id']] = taken.get(cand['id'], 0) + take
+            need -= take
+
+    db.commit()
+    db.close()
+    return redirect(url_for('decks.allocations', deck_id=deck_id))
+
+
 # ── Delete deck ───────────────────────────────────────────────────────────────
 
 @decks_bp.route('/<int:deck_id>/rename', methods=['POST'])
@@ -1080,6 +1280,11 @@ def rename_deck(deck_id):
 @decks_bp.route('/<int:deck_id>/delete', methods=['POST'])
 def delete_deck(deck_id):
     db = get_db()
+    # sqlite3 runs with foreign_keys OFF, so ON DELETE CASCADE never fires —
+    # clean up children explicitly (deck deletion used to orphan deck_cards).
+    db.execute('''DELETE FROM deck_allocations WHERE deck_card_id IN
+                  (SELECT id FROM deck_cards WHERE deck_id=?)''', [deck_id])
+    db.execute('DELETE FROM deck_cards WHERE deck_id=?', [deck_id])
     db.execute('DELETE FROM decks WHERE id=?', [deck_id])
     db.commit()
     db.close()
@@ -1095,9 +1300,11 @@ def clone_deck(deck_id):
     if not src:
         db.close()
         abort(404)
+    # Clones are always list decks: the original's physical cards can't back
+    # two decks at once, so a copy starts life as a theoretical list.
     cur = db.execute(
-        'INSERT INTO decks (name, format, description, created_at) VALUES (?,?,?,?)',
-        [f'{src["name"]} (copy)', src['format'], src['description'], _now()]
+        'INSERT INTO decks (name, format, description, kind, created_at) VALUES (?,?,?,?,?)',
+        [f'{src["name"]} (copy)', src['format'], src['description'], 'list', _now()]
     )
     new_id = cur.lastrowid
     db.execute('''

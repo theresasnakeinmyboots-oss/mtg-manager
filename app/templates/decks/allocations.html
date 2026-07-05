@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+{% block title %}{{ deck.name }} · Allocations - TheJar{% endblock %}
+
+{% block content %}
+<div class="alloc-page">
+    <div class="deck-detail-header">
+        <div class="deck-detail-title">
+            <a href="/decks/{{ deck.id }}" class="deck-back">← {{ deck.name }}</a>
+            <h1>Allocations</h1>
+            <span class="deck-format-badge">{{ format_label }}</span>
+        </div>
+        <div class="deck-detail-actions">
+            <form method="POST" action="/decks/{{ deck.id }}/allocate"
+                  onsubmit="return confirm('Re-allocate this deck? Existing allocations will be rebuilt from your collection.');">
+                <button type="submit" class="btn btn-primary btn-sm">⟳ Auto-allocate</button>
+            </form>
+        </div>
+    </div>
+
+    <p class="alloc-intro">
+        Each card in a physical deck is backed by specific copies from your collection.
+        Copies allocated here can't be claimed by another physical deck.
+        Auto-allocate prefers the exact printing the deck lists, then falls back to any owned printing.
+    </p>
+
+    <div class="alloc-summary">
+        <span class="alloc-chip alloc-ok">✓ {{ summary.fully }} fully allocated</span>
+        {% if summary.partial %}<span class="alloc-chip alloc-warn">◐ {{ summary.partial }} partial</span>{% endif %}
+        {% if summary.missing %}<span class="alloc-chip alloc-bad">✕ {{ summary.missing }} unallocated</span>{% endif %}
+        {% if summary.broken %}<span class="alloc-chip alloc-bad">⚠ {{ summary.broken }} broken (collection row gone — re-allocate)</span>{% endif %}
+    </div>
+
+    <div class="alloc-list">
+        {% for card in cards %}
+        <div class="alloc-row {{ 'alloc-row-short' if card.short else '' }}">
+            <div class="alloc-card">
+                <span class="alloc-card-name">
+                    {{ card.count }}× {{ card.name }}
+                    {% if card.board != 'main' %}<span class="alloc-board">{{ card.board }}</span>{% endif %}
+                </span>
+                {% if card.set_name %}
+                <span class="alloc-card-printing">{{ card.set_name }} #{{ card.collector_number }}</span>
+                {% endif %}
+            </div>
+            <div class="alloc-sources">
+                {% for a in card.allocs %}
+                <div class="alloc-source">
+                    {{ a.qty }}× from <a href="/collection/{{ a.collection_row_id }}">{{ a.collection_name or 'collection' }}</a>
+                    <span class="alloc-source-meta">
+                        {{ a.coll_set_name }} #{{ a.coll_collector_number }}
+                        · {{ a.condition or '—' }}{% if a.foil %} · foil{% endif %}
+                        {% if a.coll_scryfall_id != card.scryfall_id %}
+                        <span class="alloc-substitute" title="Different printing than the deck lists">substitute printing</span>
+                        {% endif %}
+                    </span>
+                </div>
+                {% endfor %}
+                {% if card.short %}
+                <div class="alloc-missing">{{ card.short }} cop{{ 'y' if card.short == 1 else 'ies' }} not owned / unavailable</div>
+                {% endif %}
+                {% if card.has_broken %}
+                <div class="alloc-missing">⚠ stale allocation — the backing collection row no longer exists</div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

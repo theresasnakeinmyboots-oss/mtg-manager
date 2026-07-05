@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, jsonify, Response, send_file, redirect, url_for
 from app.database import get_db
-from app.cards_repo import get_or_create_card
+from app.cards_repo import get_or_create_card, decks_containing
 from app.scryfall import ScryfallClient
 from app.importer import import_csv
 from werkzeug.utils import secure_filename
@@ -499,17 +499,8 @@ def card_detail(card_id):
         ''', (card['name'],))
         alternatives = [dict(r) for r in cursor.fetchall()]
 
-    # Decks containing this card (matched by name, same as deck-view ownership logic)
-    decks_with_card = []
-    if card['name']:
-        cursor = db.execute('''
-            SELECT d.id, d.name, d.format, dc.board, dc.count
-            FROM deck_cards dc
-            JOIN decks d ON d.id = dc.deck_id
-            WHERE LOWER(dc.name) = LOWER(?)
-            ORDER BY d.name
-        ''', (card['name'],))
-        decks_with_card = [dict(r) for r in cursor.fetchall()]
+    # Decks containing this card as a game object (any printing)
+    decks_with_card = decks_containing(db, card['scryfall_id'], card['name'])
 
     db.close()
     return render_template('collection/card_detail.html', card=card, alternatives=alternatives,

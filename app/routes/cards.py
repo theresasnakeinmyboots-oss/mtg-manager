@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, abort
 from app.database import get_db
+from app.cards_repo import decks_containing, owned_total_for
 import json
 
 cards_bp = Blueprint('cards', __name__, url_prefix='/')
@@ -42,21 +43,8 @@ def reference(scryfall_id):
     ''', (card['name'],)).fetchall()
     alternatives = [dict(r) for r in alternatives]
 
-    owned_total = db.execute('''
-        SELECT COALESCE(SUM(c.count), 0) as total
-        FROM collection c
-        JOIN cards k ON c.card_id = k.id
-        WHERE LOWER(k.name) = LOWER(?)
-    ''', (card['name'],)).fetchone()['total']
-
-    decks_with_card = db.execute('''
-        SELECT d.id, d.name, d.format, dc.board, dc.count
-        FROM deck_cards dc
-        JOIN decks d ON d.id = dc.deck_id
-        WHERE LOWER(dc.name) = LOWER(?)
-        ORDER BY d.name
-    ''', (card['name'],)).fetchall()
-    decks_with_card = [dict(r) for r in decks_with_card]
+    owned_total = owned_total_for(db, scryfall_id, card['name'])
+    decks_with_card = decks_containing(db, scryfall_id, card['name'])
 
     db.close()
     return render_template('cards/reference.html', card=card, alternatives=alternatives,

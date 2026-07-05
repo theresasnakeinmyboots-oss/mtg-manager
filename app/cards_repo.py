@@ -6,6 +6,63 @@ four places (switch_printing, quick_add, deck reconcile, dlens import). The full
 """
 
 
+def resolve_oracle_id(db, scryfall_id):
+    """Map a printing to its oracle_id (the card's identity as a game object)."""
+    if not scryfall_id:
+        return None
+    row = db.execute(
+        'SELECT oracle_id FROM scryfall_bulk WHERE scryfall_id = ?', (scryfall_id,)
+    ).fetchone()
+    return row['oracle_id'] if row else None
+
+
+def decks_containing(db, scryfall_id, name=None):
+    """Decks that contain this card as a game object — any printing counts.
+    Falls back to name matching only when the printing has no oracle_id
+    (unenriched rows, pack ephemera)."""
+    oracle_id = resolve_oracle_id(db, scryfall_id)
+    if oracle_id:
+        rows = db.execute('''
+            SELECT d.id, d.name, d.format, d.kind, dc.board, dc.count
+            FROM deck_cards dc
+            JOIN decks d ON d.id = dc.deck_id
+            JOIN scryfall_bulk b ON dc.scryfall_id = b.scryfall_id
+            WHERE b.oracle_id = ?
+            ORDER BY d.name
+        ''', (oracle_id,)).fetchall()
+    elif name:
+        rows = db.execute('''
+            SELECT d.id, d.name, d.format, d.kind, dc.board, dc.count
+            FROM deck_cards dc
+            JOIN decks d ON d.id = dc.deck_id
+            WHERE LOWER(dc.name) = LOWER(?)
+            ORDER BY d.name
+        ''', (name,)).fetchall()
+    else:
+        rows = []
+    return [dict(r) for r in rows]
+
+
+def owned_total_for(db, scryfall_id, name=None):
+    """Total owned copies of this card as a game object, across all printings."""
+    oracle_id = resolve_oracle_id(db, scryfall_id)
+    if oracle_id:
+        return db.execute('''
+            SELECT COALESCE(SUM(c.count), 0)
+            FROM collection c
+            JOIN scryfall_bulk b ON c.scryfall_id = b.scryfall_id
+            WHERE b.oracle_id = ?
+        ''', (oracle_id,)).fetchone()[0]
+    if name:
+        return db.execute('''
+            SELECT COALESCE(SUM(c.count), 0)
+            FROM collection c
+            JOIN cards k ON c.card_id = k.id
+            WHERE LOWER(k.name) = LOWER(?)
+        ''', (name,)).fetchone()[0]
+    return 0
+
+
 def get_or_create_card(db, scryfall_id):
     """Return the `cards.id` for a given scryfall_id, creating the row from
     scryfall_bulk if it doesn't exist yet.

@@ -1902,6 +1902,72 @@ i.ss {
     text-decoration: none;
 }
 .deck-mismatch-badge:hover { background: color-mix(in srgb, var(--warning) 25%, transparent); }
+
+/* Deck kind (list vs physical) */
+.deck-kind-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    padding: 0.2em 0.6em;
+    border-radius: 99px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+button.deck-kind-badge:hover { border-color: var(--text-secondary); }
+.deck-kind-physical { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
+span.deck-kind-badge { cursor: default; }
+
+.deck-alloc-badge {
+    font-weight: 600;
+    padding: 0.2em 0.6em;
+    border-radius: 6px;
+    text-decoration: none;
+}
+.deck-alloc-badge.complete   { color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent); }
+.deck-alloc-badge.incomplete { color: var(--warning); background: color-mix(in srgb, var(--warning) 15%, transparent); }
+
+/* Deck kind selector on create/import forms */
+.deck-kind-choice { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
+.deck-kind-choice legend { font-size: 0.85rem; font-weight: 600; padding: 0 0.4em; }
+.deck-kind-option { display: flex; gap: 0.6rem; align-items: baseline; font-size: 0.85rem; color: var(--text-secondary); padding: 0.3rem 0; }
+.deck-kind-option input { flex-shrink: 0; }
+
+/* Allocations page */
+.alloc-page { max-width: 900px; margin: 0 auto; }
+.alloc-intro { color: var(--text-secondary); font-size: 0.9rem; margin: 0.75rem 0 1rem; }
+.alloc-summary { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.alloc-chip { font-size: 0.82rem; font-weight: 600; padding: 0.25em 0.7em; border-radius: 99px; }
+.alloc-ok   { color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent); }
+.alloc-warn { color: var(--warning); background: color-mix(in srgb, var(--warning) 15%, transparent); }
+.alloc-bad  { color: var(--danger);  background: color-mix(in srgb, var(--danger) 15%, transparent); }
+.alloc-list { display: flex; flex-direction: column; }
+.alloc-row {
+    display: flex;
+    gap: 1.5rem;
+    padding: 0.7rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.alloc-row-short { background: color-mix(in srgb, var(--warning) 6%, transparent); }
+.alloc-card { flex: 0 0 40%; display: flex; flex-direction: column; gap: 0.15rem; }
+.alloc-card-name { font-weight: 600; }
+.alloc-board {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--text-secondary); border: 1px solid var(--border);
+    border-radius: 99px; padding: 0.05em 0.5em; margin-left: 0.4rem;
+}
+.alloc-card-printing { font-size: 0.8rem; color: var(--text-secondary); }
+.alloc-sources { flex: 1; display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; }
+.alloc-source-meta { color: var(--text-secondary); font-size: 0.8rem; }
+.alloc-substitute {
+    color: var(--warning);
+    font-weight: 600;
+    margin-left: 0.35rem;
+}
+.alloc-missing { color: var(--warning); font-size: 0.85rem; font-weight: 600; }
+
 .deck-validity { font-size:0.82rem; font-weight:600; padding:0.2em 0.6em; border-radius:6px; }
 .deck-validity.valid   { color:var(--success); background:color-mix(in srgb, var(--success) 15%, transparent); }
 .deck-validity.invalid { color:var(--warning); background:color-mix(in srgb, var(--warning) 15%, transparent); cursor:default; }
