@@ -17,6 +17,7 @@ A Flask web application for managing Magic: The Gathering card collections and b
 
 ### Deck Builder
 - **Formats**: Standard, Modern, Pioneer, Legacy, Commander/EDH, and Sealed (40-card minimum)
+- **List vs physical decks** — a *list* deck is a theoretical decklist (cards tracked as game objects; you don't need to own them), while a *physical* deck is built from specific owned cards stored separately from the collection. Physical decks are backed by **allocations**: auto-allocation reserves owned copies (preferring the exact printing, falling back to any printing), and a copy allocated to one physical deck can't be claimed by another
 - Create decks from scratch, import from a text decklist, import from a `.dlens` file, clone an existing deck, or seed a sealed deck from an owned collection
 - Add/remove cards with autocomplete search; manage main/side/commander boards; card-grid or list view (list view shows edition, collector number, and per-row counts)
 - **Ownership tracking** — see owned count per card; cards you own link to their exact collection row, unowned cards link to a read-only reference page
@@ -67,7 +68,8 @@ Data persists in a named volume at `/data`.
 - **cards** — canonical Scryfall card data referenced by owned rows
 - **scryfall_bulk** — full Scryfall bulk dataset (all printings, prices, images)
 - **scryfall_cache** — raw Scryfall API response cache
-- **decks** / **deck_cards** — deck metadata and composition (main/side/commander boards)
+- **decks** / **deck_cards** — deck metadata (including list/physical kind) and composition (main/side/commander boards)
+- **deck_allocations** — which owned collection rows physically back each card in a physical deck
 - **edhrec_cache** / **edhrec_cards** / **combo_cache** / **combo_details_cache** — cached EDHREC commander data, suggestions, and combos
 - **deck_health_mutes** — muted health-check warnings per deck
 - **deck_strategy_feedback** — strategy auto-detection history and user feedback
