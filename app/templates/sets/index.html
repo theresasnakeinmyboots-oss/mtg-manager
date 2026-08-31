@@ -3,7 +3,7 @@
 {% block title %}Set View{% if groups %} — {{ groups|map(attribute='set_name')|join(', ') }}{% endif %} - TheJar{% endblock %}
 
 {% block content %}
-<div class="set-view-page">
+<div class="set-view-page" id="setViewPage">
 
     <div class="set-toolbar">
         <div class="set-toolbar-left">
@@ -37,6 +37,12 @@
             <button id="purchaseListBtn" class="btn btn-primary btn-sm" style="display:none;">Purchase list (<span id="purchaseCount">0</span>)</button>
             {% endif %}
         </div>
+        {% if groups %}
+        <div class="deck-view-toggle" id="setViewToggle">
+            <button type="button" class="deck-view-btn active" id="btnGridView" title="Grid view">⊞ Grid</button>
+            <button type="button" class="deck-view-btn" id="btnBinderView" title="Binder view — 5×4 pages like a physical binder">▦ Binder</button>
+        </div>
+        {% endif %}
     </div>
 
     {% if set_codes %}
@@ -121,6 +127,11 @@
                 </div>
                 {% endfor %}
             </div>
+            <div class="binder-pager" style="display:none;">
+                <button type="button" class="binder-nav-btn binder-prev" title="Previous page">‹ Prev</button>
+                <span class="binder-page-label">Page <span class="binder-page-num">1</span> of <span class="binder-page-total">1</span></span>
+                <button type="button" class="binder-nav-btn binder-next" title="Next page">Next ›</button>
+            </div>
             {% else %}
             <p class="empty-state-inline">No cards found for this set.</p>
             {% endif %}
@@ -202,6 +213,81 @@ const ms = new MultiSelect('#setSelect', {
 document.getElementById('viewSetsBtn').addEventListener('click', () => {
     navigateToSets(ms.selectedValues);
 });
+
+// ── Binder view — 5×4 pages (20 pockets), mirroring a physical binder ────
+(function () {
+    const setViewPage   = document.getElementById('setViewPage');
+    const btnGridView   = document.getElementById('btnGridView');
+    const btnBinderView = document.getElementById('btnBinderView');
+    if (!btnGridView || !btnBinderView) return; // no groups rendered — nothing to page
+
+    const PAGE_SIZE = 20; // 5 columns × 4 rows
+
+    const binders = Array.from(document.querySelectorAll('.set-grid')).map(grid => {
+        const cards = Array.from(grid.querySelectorAll('.set-card-thumb'));
+        const pager = grid.nextElementSibling; // .binder-pager, rendered right after .set-grid
+        const totalPages = Math.max(1, Math.ceil(cards.length / PAGE_SIZE));
+        const state = { grid, cards, pager, page: 0, totalPages, emptySlots: [] };
+
+        if (pager && pager.classList.contains('binder-pager')) {
+            const prevBtn = pager.querySelector('.binder-prev');
+            const nextBtn = pager.querySelector('.binder-next');
+            const numEl   = pager.querySelector('.binder-page-num');
+            const totalEl = pager.querySelector('.binder-page-total');
+            totalEl.textContent = totalPages;
+
+            state.render = () => {
+                const start = state.page * PAGE_SIZE;
+                const end = start + PAGE_SIZE;
+                cards.forEach((c, i) => { c.style.display = (i >= start && i < end) ? '' : 'none'; });
+
+                // Pad a short last page with empty pockets so it still reads as a full binder page
+                state.emptySlots.forEach(el => el.remove());
+                state.emptySlots = [];
+                const shown = Math.min(end, cards.length) - start;
+                for (let i = shown; i < PAGE_SIZE; i++) {
+                    const slot = document.createElement('div');
+                    slot.className = 'binder-slot-empty';
+                    // Two-part structure (image box + hidden label spacer) so this
+                    // cell's natural height matches a real .set-card-thumb exactly —
+                    // see the CSS comment on .binder-slot-empty for why that matters.
+                    slot.innerHTML = '<div class="binder-slot-empty-pocket"></div>'
+                                    + '<div class="binder-slot-empty-label">&nbsp;</div>';
+                    grid.appendChild(slot);
+                    state.emptySlots.push(slot);
+                }
+
+                numEl.textContent = state.page + 1;
+                prevBtn.disabled = state.page === 0;
+                nextBtn.disabled = state.page >= totalPages - 1;
+            };
+            prevBtn.addEventListener('click', () => { if (state.page > 0) { state.page--; state.render(); } });
+            nextBtn.addEventListener('click', () => { if (state.page < totalPages - 1) { state.page++; state.render(); } });
+        }
+        return state;
+    });
+
+    function setBinderMode(on) {
+        setViewPage.classList.toggle('binder-mode', on);
+        btnGridView.classList.toggle('active', !on);
+        btnBinderView.classList.toggle('active', on);
+        binders.forEach(b => {
+            if (on) {
+                b.page = 0;
+                if (b.pager) b.pager.style.display = 'flex';
+                if (b.render) b.render();
+            } else {
+                if (b.pager) b.pager.style.display = 'none';
+                b.emptySlots.forEach(el => el.remove());
+                b.emptySlots = [];
+                b.cards.forEach(c => { c.style.display = ''; });
+            }
+        });
+    }
+
+    btnGridView.addEventListener('click', () => setBinderMode(false));
+    btnBinderView.addEventListener('click', () => setBinderMode(true));
+})();
 
 // ── Purchase list ─────────────────────────────────────────────────
 {% if groups %}

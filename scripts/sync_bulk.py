@@ -96,15 +96,19 @@ def main():
     session = requests.Session()
     session.headers['User-Agent'] = 'mtg-manager/1.0'
 
-    # Get bulk data download URL
+    # Get bulk data download URL. Scryfall's manifest now serves a gzipped
+    # JSONL file (jsonl_download_uri) instead of the old single-array
+    # download_uri — fall back to the old key in case that ever comes back.
     print('  Fetching bulk data manifest…')
     resp = session.get('https://api.scryfall.com/bulk-data/default-cards', timeout=30)
     resp.raise_for_status()
-    download_url = resp.json()['download_uri']
+    manifest = resp.json()
+    download_url = manifest.get('jsonl_download_uri') or manifest['download_uri']
+    is_jsonl = 'jsonl_download_uri' in manifest and download_url == manifest['jsonl_download_uri']
     print(f'  Downloading from {download_url}…')
 
     # Stream download to temp file
-    tmp_path = config.DATA_DIR / 'scryfall_bulk.json.tmp'
+    tmp_path = config.DATA_DIR / ('scryfall_bulk.jsonl.gz.tmp' if is_jsonl else 'scryfall_bulk.json.tmp')
     resp = session.get(download_url, stream=True, timeout=120)
     resp.raise_for_status()
     downloaded = 0
@@ -126,13 +130,19 @@ def main():
     batch = []
     BATCH_SIZE = 500
 
-    with open(tmp_path, encoding='utf-8') as f:
-        cards = json.load(f)
+    if is_jsonl:
+        import gzip
+        card_iter = (json.loads(line) for line in gzip.open(tmp_path, 'rt', encoding='utf-8') if line.strip())
+        total = None
+        print('  streaming JSONL (total count unknown up front)')
+    else:
+        with open(tmp_path, encoding='utf-8') as f:
+            cards = json.load(f)
+        card_iter = iter(cards)
+        total = len(cards)
+        print(f'  {total} cards in bulk file')
 
-    total = len(cards)
-    print(f'  {total} cards in bulk file')
-
-    for i, card in enumerate(cards):
+    for i, card in enumerate(card_iter):
         # Skip tokens, emblems, art cards — no gameplay data
         if card.get('layout') in ('token', 'emblem', 'art_series', 'double_faced_token'):
             skipped += 1
@@ -144,7 +154,7 @@ def main():
             batch = []
             if (i + 1) % 50000 == 0:
                 db.commit()
-                print(f'  {i+1}/{total}…')
+                print(f'  {i+1}' + (f'/{total}' if total else '') + '…')
 
     if batch:
         db.executemany(UPSERT_SQL, batch)

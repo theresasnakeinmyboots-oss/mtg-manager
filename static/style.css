@@ -175,29 +175,34 @@ main {
     gap: 1rem;
 }
 
-/* Toolbar */
+/* Toolbar — two stacked rows: identity/search/view up top, refine (filter/sort)
+   below. Keeping them on separate rows means neither ever has to fight the
+   other for space, and each row can wrap independently on narrow screens
+   instead of the whole toolbar overflowing or squishing. */
 .collection-toolbar {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
+    flex-direction: column;
+    gap: 0.65rem;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 0.75rem 1.25rem;
 }
 
-.toolbar-left {
+.toolbar-row {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    flex: 1;
+    flex-wrap: wrap;
+    gap: 0.75rem;
 }
 
-.toolbar-right {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
+.toolbar-row-primary {
+    justify-content: flex-start;
+}
+
+.toolbar-row-secondary {
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
 }
 
 .total-count {
@@ -207,11 +212,20 @@ main {
 }
 
 .search-form {
-    flex: 1;
-    max-width: 360px;
+    flex: 1 1 260px;
+    min-width: 200px;
+    max-width: 480px;
+}
+
+.search-input-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 .search-input {
+    flex: 1;
+    min-width: 0;
     width: 100%;
     padding: 0.5rem 0.9rem;
     background: var(--background);
@@ -224,8 +238,15 @@ main {
 
 .search-input-adv {
     border-color: var(--secondary, #06b6d4);
-    flex: 1;
-    min-width: 260px;
+}
+
+/* View toggle + import actions, pushed to the end of the primary row */
+.toolbar-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-left: auto;
 }
 
 .adv-active {
@@ -1013,27 +1034,25 @@ i.ss {
         flex-wrap: wrap;
     }
 
-    /* Toolbar: stack left/right */
+    /* Toolbar: rows already stack/wrap by default — just tighten padding
+       and let the search box and action group each claim a full line. */
     .collection-toolbar {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0.75rem;
         padding: 0.75rem 1rem;
     }
 
-    .toolbar-left {
-        flex-wrap: wrap;
-        gap: 0.5rem;
-    }
-
-    .toolbar-right {
-        flex-wrap: wrap;
+    .toolbar-row {
         gap: 0.5rem;
     }
 
     .search-form {
         max-width: 100%;
         flex: 1 1 100%;
+    }
+
+    .toolbar-actions {
+        margin-left: 0;
+        flex: 1 1 100%;
+        justify-content: flex-end;
     }
 
     .sort-controls {
@@ -1694,6 +1713,80 @@ i.ss {
     font-size: 0.68rem;
     color: var(--text-secondary);
     padding: 0.2rem 0;
+}
+
+/* Binder view — fixed 5×4 page (20 pockets) instead of the fluid auto-fill
+   grid, paginated by JS. Higher specificity than the .set-grid media-query
+   overrides below, so it wins at any viewport width without needing its
+   own breakpoints. */
+.set-view-page.binder-mode .set-grid {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 1rem;
+}
+
+/* A real .set-card-thumb is taller than a plain 5/7 image — it also carries
+   a .set-card-num label underneath. If an empty pocket were sized to just
+   the image's aspect-ratio, CSS Grid's row auto-sizing goes inconsistent
+   whenever a row mixes real cards and pockets (rows disagree on height,
+   and the grid container ends up shorter than its own rows, so the last
+   row spills out past the pager below it). Giving the pocket the same two
+   pieces — image box + invisible label spacer — keeps every cell's natural
+   height calculation identical regardless of what's actually in it. */
+.binder-slot-empty {
+    display: flex;
+    flex-direction: column;
+}
+
+.binder-slot-empty-pocket {
+    aspect-ratio: 5 / 7;
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    opacity: 0.4;
+}
+
+.binder-slot-empty-label {
+    font-size: 0.68rem;
+    padding: 0.2rem 0;
+    visibility: hidden;
+}
+
+.binder-pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 0.75rem;
+    padding: 0.6rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.binder-nav-btn {
+    padding: 0.4rem 0.9rem;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.binder-nav-btn:hover:not(:disabled) {
+    background: var(--surface-light);
+    border-color: var(--primary);
+}
+
+.binder-nav-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.binder-page-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 @media (max-width: 768px) {
@@ -2674,6 +2767,54 @@ span.deck-kind-badge { cursor: default; }
     align-items: center;
     gap: 0.4rem;
     flex-wrap: wrap;
+}
+
+/* Win conditions table — shares .cut-table's container chrome, own grid */
+.wincon-table-head,
+.wincon-row {
+    display: grid;
+    grid-template-columns: 2fr 1.3fr 1fr 1.4fr;
+    gap: 1rem;
+    padding: 0.6rem 1rem;
+    align-items: center;
+}
+
+.wincon-table-head {
+    background: var(--surface-light);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+}
+
+.wincon-row {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    transition: background 0.12s;
+}
+.wincon-row:hover {
+    background: var(--surface-light);
+}
+
+.wincon-name {
+    font-weight: 500;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.wincon-type {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.wincon-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
 }
 
 .cut-board-tag {

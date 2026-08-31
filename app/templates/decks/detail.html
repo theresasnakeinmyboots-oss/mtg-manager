@@ -549,6 +549,38 @@
     </section>
     {% endif %}
 
+    <!-- Win conditions -->
+    {% if win_cons %}
+    <section class="deck-section" id="winConditions">
+        <h2 class="deck-section-heading">Win Conditions <span class="deck-section-count">{{ win_cons | length }}</span></h2>
+        <p class="deck-section-subhead">Cards that can actually close out the game — explicit win-the-game text, or a big enough threat to end it on their own</p>
+        <div class="cut-table">
+            <div class="wincon-table-head">
+                <span>Card</span>
+                <span>Type</span>
+                <span>Mana Cost</span>
+                <span>Why</span>
+            </div>
+            {% for c in win_cons %}
+            <div class="wincon-row"
+                 data-scryfall-id="{{ c.scryfall_id }}"
+                 {% if c.image_uri_normal %}data-img="{{ c.image_uri_normal }}"{% endif %}>
+                <span class="wincon-name">
+                    {{ c.name }}
+                    {% if c.count > 1 %}<span class="deck-type-count">×{{ c.count }}</span>{% endif %}
+                </span>
+                <span class="wincon-type">{{ (c.type_line or '').split('—')[0].strip() }}</span>
+                <span class="wincon-mana">{% if c.mana_cost %}{{ c.mana_cost | format_mana_cost | safe }}{% else %}—{% endif %}</span>
+                <span class="wincon-tags">
+                    {% if c.is_explicit %}<span class="deck-sugg-tag">Win con</span>{% endif %}
+                    {% if c.is_threat %}<span class="deck-sugg-tag">Threat</span>{% endif %}
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
 </div>
 
 <!-- Card hover zoom (reuse from set view) -->

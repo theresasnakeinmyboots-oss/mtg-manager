@@ -10,6 +10,7 @@ Usage:
 import json
 import time
 import re
+import unicodedata
 import requests
 from datetime import datetime, timedelta
 
@@ -29,6 +30,11 @@ def _name_to_slug(name: str) -> str:
     """Convert a card name to an EDHREC URL slug."""
     # Handle DFCs — EDHREC uses only the front face name
     name = name.split(' // ')[0]
+    # Transliterate accented characters to ASCII (é -> e, ñ -> n, …) before
+    # slugifying — EDHREC's own slugs do this, so without it any accented
+    # name (Bartolomé, Krenko's cousin whoever) silently drops the letter
+    # entirely and 403s against the real URL instead of matching it.
+    name = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode()
     slug = name.lower()
     slug = re.sub(r"[',.]", '', slug)
     slug = re.sub(r'[^a-z0-9]+', '-', slug)

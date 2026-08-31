@@ -11,6 +11,7 @@
             <a class="deck-row-name-link" href="{% if card.collection_row_id %}/collection/{{ card.collection_row_id }}{% else %}/card/{{ card.scryfall_id }}{% endif %}">{{ card.name }}</a>
             {% if card.owned_count == 0 %}<span class="deck-unowned-badge">not owned</span>{% endif %}
             {% if cut_sids is defined and card.scryfall_id in cut_sids %}<a href="/decks/{{ deck.id }}/suggestions#cuts" class="deck-cut-badge" title="Low synergy — consider swapping this card">✂ cut?</a>{% endif %}
+            {% if card_tags is defined %}{% for tag in card_tags.get(card.id, []) %}<span class="deck-sugg-tag">{{ tag }}</span>{% endfor %}{% endif %}
         </span>
         {% if card.set_code %}
         <span class="deck-row-edition">

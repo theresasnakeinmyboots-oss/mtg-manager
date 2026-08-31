@@ -3,6 +3,7 @@ from app.database import get_db
 from app.scryfall import ScryfallClient
 from app.importer import import_csv
 from app.importer_dlens import import_dlens
+from app.importer_manabox import import_manabox, is_manabox_csv
 from app.exporter_dlens import export_dlens
 from werkzeug.utils import secure_filename
 from datetime import datetime
@@ -103,6 +104,7 @@ def import_to_staging():
 
     filepath = config.DATA_DIR / filename
     file.save(str(filepath))
+    is_manabox = is_csv and is_manabox_csv(str(filepath))
 
     def generate():
         db = get_db()
@@ -135,6 +137,13 @@ def import_to_staging():
                         f'dlens cols: {schema_info["dlens_cols"]}, apk cols: {schema_info["apk_cols"]}'
                     )
                 }) + '\n\n'
+            elif is_manabox:
+                import json as _json
+                yield 'data: ' + _json.dumps({
+                    'status': 'importing', 'progress': 10,
+                    'message': f'Reading {filename} as a ManaBox export…'
+                }) + '\n\n'
+                inserted, skipped, missing = import_manabox(str(filepath), db, collection_id=staging_id)
             else:
                 import json as _json
                 inserted, skipped = import_csv(str(filepath), db, collection_id=staging_id)

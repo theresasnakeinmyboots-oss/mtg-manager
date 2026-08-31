@@ -1,17 +1,13 @@
 {% extends 'base.html' %}
-{% block title %}Import Delver Lens Deck - TheJar{% endblock %}
+{% block title %}Import ManaBox Deck - TheJar{% endblock %}
 
 {% block content %}
 <div class="deck-form-page">
-    <h1>Import Delver Lens Deck</h1>
+    <h1>Import ManaBox Deck</h1>
     <p class="deck-import-hint">
-        Upload a <code>.dlens</code> file exported from Delver Lens. All cards will be added to the
-        selected board. Requires the Delver Lens <code>data.db</code> to be uploaded via the
-        <a href="/admin">Admin page</a> first.
+        Upload a <code>.csv</code> file exported from ManaBox. All cards will be added to the
+        selected board, matched by their Scryfall ID.
     </p>
-    {% if not has_datadb %}
-    <p class="form-error">⚠ data.db not found. Please upload it via the <a href="/admin">Admin page</a> before importing.</p>
-    {% endif %}
     {% if error %}<p class="form-error">{{ error }}</p>{% endif %}
     <form method="POST" enctype="multipart/form-data" class="deck-form">
         <label>
@@ -51,14 +47,14 @@
             </select>
         </label>
         <label>
-            Delver Lens file (.dlens)
-            <input type="file" name="file" accept=".dlens" required>
+            ManaBox file (.csv)
+            <input type="file" name="file" accept=".csv" required>
         </label>
         <div class="deck-form-actions">
             <a href="/decks/import" class="btn btn-secondary btn-sm">Text import instead</a>
-            <a href="/decks/import-manabox" class="btn btn-secondary btn-sm">ManaBox instead</a>
+            <a href="/decks/import-dlens" class="btn btn-secondary btn-sm">Delver Lens instead</a>
             <a href="/decks" class="btn btn-secondary btn-sm">Cancel</a>
-            <button type="submit" class="btn btn-primary btn-sm" {% if not has_datadb %}disabled{% endif %}>Import</button>
+            <button type="submit" class="btn btn-primary btn-sm">Import</button>
         </div>
     </form>
 </div>

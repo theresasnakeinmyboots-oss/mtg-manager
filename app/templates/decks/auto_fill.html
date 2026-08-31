@@ -35,6 +35,12 @@
 
     {% elif result %}
 
+    {% if warning %}
+    <div class="deck-errors">
+        <div class="deck-error-item">⚠ {{ warning }}</div>
+    </div>
+    {% endif %}
+
     <!-- Stats summary -->
     <div class="autofill-summary">
         <div class="autofill-stat">
@@ -75,6 +81,43 @@
         </div>
         {% endfor %}
     </div>
+
+    <!-- Mana curve -->
+    {% if result.curve %}
+    <div class="autofill-quotas">
+        {% for row in result.curve %}
+        <div class="autofill-quota">
+            <span class="autofill-quota-label">CMC {{ row.label }}</span>
+            <div class="autofill-quota-bar-track">
+                <div class="autofill-quota-bar-fill {% if row.filled >= row.target %}autofill-ok{% elif row.filled >= row.target // 2 %}autofill-warn{% else %}autofill-low{% endif %}"
+                     style="width:{{ [[(row.filled / row.target * 100) | int if row.target else 100, 100] | min, 0] | max }}%"></div>
+            </div>
+            <span class="autofill-quota-num {% if row.filled >= row.target %}autofill-ok{% elif row.filled >= row.target // 2 %}autofill-warn{% else %}autofill-low{% endif %}">
+                {{ row.filled }}/{{ row.target }}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Combos assembled from owned cards -->
+    {% if result.combos %}
+    <section class="autofill-section">
+        <h2 class="autofill-section-heading">
+            Combos included
+            <span class="deck-section-count">{{ result.combos | length }}</span>
+        </h2>
+        {% for combo in result.combos %}
+        <div class="combo-row combo-row-complete">
+            <span class="combo-pieces">{{ combo.cards_added | join(' + ') }}</span>
+            <div class="combo-meta">
+                <span class="combo-results">{{ combo.result }}</span>
+                <span class="combo-decks">{{ '{:,}'.format(combo.popularity) }} decks</span>
+            </div>
+        </div>
+        {% endfor %}
+    </section>
+    {% endif %}
 
     <!-- Apply form -->
     <form method="POST" action="/decks/{{ deck.id }}/auto-fill/apply" id="applyForm">

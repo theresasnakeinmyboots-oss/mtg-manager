@@ -56,6 +56,77 @@ def _is_big_threat(type_line, cmc, power):
             and int(power) >= 5)
 
 
+def find_win_cons(rows):
+    """
+    Return the deck's actual win-condition cards — deduped by scryfall_id,
+    highest CMC first. A card qualifies if its oracle text reads as an
+    explicit win condition (WINCON_RX) or it's a big enough threat to end
+    the game on its own (_is_big_threat) — the same two checks that already
+    feed the 'Win cons' health-check count, just surfaced as a card list
+    instead of a number. Independent of the deck's chosen strategy, since
+    whether a card can win the game isn't a matter of strategy preference.
+    rows must have scryfall_id, oracle_text, type_line, cmc, power.
+    """
+    seen = set()
+    out = []
+    for r in rows:
+        sid = r.get('scryfall_id')
+        if not sid or sid in seen:
+            continue
+        oracle = r.get('oracle_text') or ''
+        is_explicit = bool(WINCON_RX.search(oracle))
+        is_threat = _is_big_threat(r.get('type_line'), r.get('cmc'), r.get('power'))
+        if not (is_explicit or is_threat):
+            continue
+        seen.add(sid)
+        out.append({**r, 'is_explicit': is_explicit, 'is_threat': is_threat})
+    out.sort(key=lambda r: -(r.get('cmc') or 0))
+    return out
+
+
+def _card_tribes(type_line):
+    """Creature subtypes (the part after the em dash), lowercased, for tribe matching."""
+    if not type_line or '—' not in type_line:
+        return set()
+    return {s.lower() for s in type_line.split('—', 1)[1].split()}
+
+
+def detect_tribe(commander_type_line):
+    """Return the commander's creature subtypes (its 'tribe'), or [] if it isn't
+    a creature / has no subtypes. A multi-typed commander (e.g. 'Elf Warrior')
+    yields both — a card matching either counts toward the tribe."""
+    if not commander_type_line or 'Creature' not in commander_type_line:
+        return []
+    return sorted(_card_tribes(commander_type_line))
+
+
+def count_type_tribe(rows, tribes):
+    """Count owned/deck creatures sharing a subtype with the commander's tribe."""
+    if not tribes:
+        return 0
+    tribe_set = {t.lower() for t in tribes}
+    return sum(
+        r['count'] for r in rows
+        if 'Creature' in (r.get('type_line') or '') and _card_tribes(r.get('type_line')) & tribe_set
+    )
+
+
+def _tribe_pattern(tribes):
+    if not tribes:
+        return None
+    return r'\b(?:' + '|'.join(re.escape(t) for t in tribes) + r')s?\b'
+
+
+def count_typal_payoffs(rows, tribes):
+    """Count cards whose oracle text references the tribe by name — lords,
+    typal tutors, cost reducers, etc."""
+    pattern = _tribe_pattern(tribes)
+    if not pattern:
+        return 0
+    rx = re.compile(pattern, re.IGNORECASE)
+    return sum(r['count'] for r in rows if rx.search(r.get('oracle_text') or ''))
+
+
 def role_tags(oracle, type_line=None, cmc=None, power=None, limit=3):
     """Return up to `limit` role labels for a card based on its oracle text,
     adding 'Threat' for big creatures. Used for suggestion-card chips."""
@@ -178,6 +249,17 @@ STRATEGIES = {
             'Win cons':   {'ok': 2,  'warn': 1,  'tip': 'A few slow win conditions is fine — you\'re grinding them out'},
         },
     },
+    'tribal': {
+        'label': 'Tribal',
+        'description': 'Build around a shared creature type — lords, typal payoffs, and a critical mass of that type.',
+        'health_checks': {
+            'Removal':       {'ok': 6,  'warn': 3,  'tip': 'Some removal to survive to your payoffs'},
+            'Card draw':     {'ok': 8,  'warn': 4,  'tip': 'Aim for 8+ draw effects'},
+            'Ramp':          {'ok': 10, 'warn': 5,  'tip': 'Aim for 10+ non-land ramp'},
+            'Type count':    {'ok': 20, 'warn': 12, 'tip': 'Critical mass of your tribe — 20+ creatures of the commander\'s type'},
+            'Typal payoffs': {'ok': 8,  'warn': 4,  'tip': 'Lords, tutors, and cost reducers that key off the type by name'},
+        },
+    },
     'other': {
         'label': 'Other',
         'description': 'A custom or unusual strategy that doesn\'t fit standard categories.',
@@ -277,10 +359,12 @@ SEALED_HEALTH_CHECKS = {
 }
 
 
-def compute_health(rows, strategy_key, is_commander, deck_format=None):
+def compute_health(rows, strategy_key, is_commander, deck_format=None, commander_type_line=None):
     """
     Returns list of (label, count, tag, tip) tuples for the given strategy.
     rows must have oracle_text, type_line, count, cmc, power fields.
+    commander_type_line is only used for the 'Tribal' strategy's Type
+    count / Typal payoffs checks — harmless to pass for any other strategy.
     """
     import re as _re
 
@@ -315,6 +399,10 @@ def compute_health(rows, strategy_key, is_commander, deck_format=None):
     for label, fn in EXTRA_COUNTERS.items():
         core_counts[label] = fn(rows)
 
+    tribes = detect_tribe(commander_type_line)
+    core_counts['Type count'] = count_type_tribe(rows, tribes)
+    core_counts['Typal payoffs'] = count_typal_payoffs(rows, tribes)
+
     result = []
     for label, thresholds in checks_def.items():
         count = core_counts.get(label, 0)
@@ -325,7 +413,7 @@ def compute_health(rows, strategy_key, is_commander, deck_format=None):
     return result
 
 
-def compute_health_sids(rows, strategy_key, deck_format=None):
+def compute_health_sids(rows, strategy_key, deck_format=None, commander_type_line=None):
     """Return dict of label -> [scryfall_ids] for click-to-filter."""
     import re as _re
     if deck_format == 'sealed':
@@ -361,12 +449,23 @@ def compute_health_sids(rows, strategy_key, deck_format=None):
         'Spells':        [r.get('scryfall_id') for r in rows if any(t in (r.get('type_line') or '') for t in ('Instant', 'Sorcery')) and r.get('scryfall_id')],
         'Spell payoffs': _sids(r'magecraft|whenever you cast an? (instant|sorcery)|whenever you cast a (noncreature|nonland)|prowess|storm'),
     }
+
+    tribes = detect_tribe(commander_type_line)
+    tribe_set = {t.lower() for t in tribes}
+    base['Type count'] = [
+        r.get('scryfall_id') for r in rows
+        if r.get('scryfall_id') and 'Creature' in (r.get('type_line') or '')
+        and _card_tribes(r.get('type_line')) & tribe_set
+    ]
+    tribe_pattern = _tribe_pattern(tribes)
+    base['Typal payoffs'] = _sids(tribe_pattern) if tribe_pattern else []
+
     return {k: v for k, v in base.items() if k in relevant}
 
 
 # ── Auto-detection ────────────────────────────────────────────────────────────
 
-def detect_strategy(rows, commander=None):
+def detect_strategy(rows, commander=None, commander_type_line=None):
     """
     Analyse deck cards and return:
       {'strategy': str, 'confidence': float (0-1), 'reasoning': [str], 'scores': {str: float}}
@@ -429,6 +528,21 @@ def detect_strategy(rows, commander=None):
     scores['aggro'] = max(aggro_score, 0)
     if creatures >= 25 and avg_cmc < 3.0:
         reasoning.append(f'Aggro: {creatures} creatures with average CMC {avg_cmc:.1f} suggests fast pressure')
+
+    # Tribal signal: commander has a creature type, and the deck backs it up
+    # with a critical mass of that type plus payoffs that name it directly.
+    tribes = detect_tribe(commander_type_line)
+    type_count = count_type_tribe(rows, tribes)
+    typal_payoffs = count_typal_payoffs(rows, tribes)
+    tribal_score = 0
+    if tribes:
+        tribal_score = (type_count / total * 2.0) + (typal_payoffs / total * 3.0)
+    scores['tribal'] = max(tribal_score, 0)
+    if tribes and (type_count >= 12 or typal_payoffs >= 4):
+        reasoning.append(
+            f'Tribal: {type_count} {"/".join(tribes)} creatures and {typal_payoffs} '
+            f'cards referencing the type by name'
+        )
 
     # Voltron signal: high equipment/auras
     volt_score = voltron / total * 4.0

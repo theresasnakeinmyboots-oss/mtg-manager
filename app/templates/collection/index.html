@@ -6,7 +6,7 @@
 <div class="collection-page">
 
     <div class="collection-toolbar">
-        <div class="toolbar-left">
+        <div class="toolbar-row toolbar-row-primary">
             <div class="collection-switcher">
                 <select id="collectionSelect" onchange="switchCollection(this.value)">
                     <option value="">All cards</option>
@@ -34,14 +34,32 @@
                 <input type="hidden" name="search_type" value="{{ search_type }}">
                 <input type="hidden" name="search_rules" value="{{ search_rules }}">
                 {% endif %}
-                {% if adv %}
-                <input type="text" name="q" value="{{ search_q }}" placeholder="type:creature o:flying cmc>=4 …" class="search-input search-input-adv" title="Advanced search: name: type: o: color: rarity: set: cmc: power: toughness:">
-                {% else %}
-                <input type="text" name="q" value="{{ search_q }}" placeholder="Search card names…" class="search-input">
-                {% endif %}
+                <div class="search-input-group">
+                    {% if adv %}
+                    <input type="text" name="q" value="{{ search_q }}" placeholder="type:creature o:flying cmc>=4 …" class="search-input search-input-adv" title="Advanced search: name: type: o: color: rarity: set: cmc: power: toughness:">
+                    {% else %}
+                    <input type="text" name="q" value="{{ search_q }}" placeholder="Search card names…" class="search-input">
+                    {% endif %}
+                    <button type="button" id="advToggle" class="btn btn-secondary btn-sm{% if adv %} adv-active{% endif %}" title="Toggle advanced search">⚡ Adv</button>
+                    {% if adv %}<button type="button" id="advHelpBtn" class="btn btn-secondary btn-sm" title="Advanced search syntax help">?</button>{% endif %}
+                </div>
             </form>
+            <div class="toolbar-actions">
+                <div class="deck-view-toggle">
+                    <button class="deck-view-btn active" id="btnCardView" title="Card view">⊞ Cards</button>
+                    <button class="deck-view-btn" id="btnListView" title="List view">☰ List</button>
+                </div>
+                {% if active_collection %}
+                <button id="addImportBtn" class="btn btn-secondary btn-sm" data-id="{{ active_collection.id }}" data-name="{{ active_collection.name }}"
+                        title="Import a file and add its cards on top of this collection">+ Add Import</button>
+                <button id="replaceImportBtn" class="btn btn-secondary btn-sm" data-id="{{ active_collection.id }}" data-name="{{ active_collection.name }}"
+                        title="Import a file and reconcile this collection to match it exactly">⟲ Replace from Import</button>
+                {% else %}
+                <button id="importBtn" class="btn btn-primary btn-sm" title="Import into a collection you choose">Import</button>
+                {% endif %}
+            </div>
         </div>
-        <div class="toolbar-right">
+        <div class="toolbar-row toolbar-row-secondary">
             <button id="filterToggle" class="btn btn-secondary btn-sm">Filters{% if filter_color or filter_type or filter_sets or filter_condition or filter_foil %} ●{% endif %}</button>
             <div class="sort-controls">
                 <span class="sort-label">Sort:</span>
@@ -76,20 +94,6 @@
                     <option value="desc" {% if dir3 == 'desc' %}selected{% endif %}>↓</option>
                 </select>
             </div>
-            <button type="button" id="advToggle" class="btn btn-secondary btn-sm{% if adv %} adv-active{% endif %}" title="Toggle advanced search">⚡ Adv</button>
-            {% if adv %}<button type="button" id="advHelpBtn" class="btn btn-secondary btn-sm" title="Advanced search syntax help">?</button>{% endif %}
-            <div class="deck-view-toggle">
-                <button class="deck-view-btn active" id="btnCardView" title="Card view">⊞ Cards</button>
-                <button class="deck-view-btn" id="btnListView" title="List view">☰ List</button>
-            </div>
-            {% if active_collection %}
-            <button id="addImportBtn" class="btn btn-secondary btn-sm" data-id="{{ active_collection.id }}" data-name="{{ active_collection.name }}"
-                    title="Import a file and add its cards on top of this collection">+ Add Import</button>
-            <button id="replaceImportBtn" class="btn btn-secondary btn-sm" data-id="{{ active_collection.id }}" data-name="{{ active_collection.name }}"
-                    title="Import a file and reconcile this collection to match it exactly">⟲ Replace from Import</button>
-            {% else %}
-            <button id="importBtn" class="btn btn-primary btn-sm" title="Import into a collection you choose">Import</button>
-            {% endif %}
         </div>
     </div>
 

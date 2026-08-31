@@ -39,13 +39,14 @@ def sample_csv(temp_data_dir):
 
 def test_index_redirect(client):
     response = client.get('/')
-    assert response.status_code == 200
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/collection'
 
 def test_collection_browse_empty(client):
     response = client.get('/collection')
     assert response.status_code == 200
     assert b'Collection Browser' in response.data
-    assert b'No cards found' in response.data
+    assert b'No cards here yet.' in response.data
 
 def test_collection_browse_with_cards(client, sample_csv):
     db = get_db()

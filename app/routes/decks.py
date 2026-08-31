@@ -328,6 +328,57 @@ def import_dlens_deck():
                            has_datadb=has_datadb, error=None, form={})
 
 
+@decks_bp.route('/import-manabox', methods=['GET', 'POST'])
+def import_manabox_deck():
+    import tempfile, os
+    from app.importer_manabox import resolve_manabox_for_deck
+
+    if request.method == 'POST':
+        name  = request.form.get('name', '').strip()
+        fmt   = request.form.get('format', '').strip()
+        desc  = request.form.get('description', '').strip()
+        kind  = request.form.get('kind', 'list')
+        if kind not in ('list', 'physical'):
+            kind = 'list'
+        board = request.form.get('board', 'main')
+        if board not in ('main', 'side', 'commander'):
+            board = 'main'
+        f = request.files.get('file')
+
+        if not name or fmt not in FORMAT_RULES:
+            return render_template('decks/import_manabox.html', formats=FORMAT_LABELS,
+                                   error='Name and format are required.', form=request.form)
+        if not f or not f.filename.lower().endswith('.csv'):
+            return render_template('decks/import_manabox.html', formats=FORMAT_LABELS,
+                                   error='Please upload a ManaBox .csv file.', form=request.form)
+
+        tmp = tempfile.NamedTemporaryFile(suffix='.csv', delete=False)
+        try:
+            f.save(tmp.name)
+            tmp.close()
+            db = get_db()
+            entries, warnings = resolve_manabox_for_deck(tmp.name, db)
+            cur = db.execute(
+                'INSERT INTO decks (name, format, description, kind, created_at) VALUES (?,?,?,?,?)',
+                [name, fmt, desc, kind, _now()]
+            )
+            deck_id = cur.lastrowid
+            for entry in entries:
+                db.execute(
+                    'INSERT INTO deck_cards (deck_id, scryfall_id, name, count, board, added_at) VALUES (?,?,?,?,?,?)',
+                    [deck_id, entry['scryfall_id'], entry['name'], entry['count'], board, _now()]
+                )
+            db.commit()
+            db.close()
+        finally:
+            os.unlink(tmp.name)
+
+        return redirect(url_for('decks.detail', deck_id=deck_id,
+                                _anchor='warnings' if warnings else ''))
+
+    return render_template('decks/import_manabox.html', formats=FORMAT_LABELS, error=None, form={})
+
+
 def _resolve_dlens_for_deck(dlens_path, datadb_path, db):
     """Read a .dlens file and resolve each card to a scryfall_id + name + count for deck use."""
     import sqlite3 as _sqlite3
@@ -635,14 +686,27 @@ def detail(deck_id):
 
     # ── Deck health checks ────────────────────────────────────────────
     from app.strategy import (STRATEGIES, DEFAULT_STRATEGY,
-                               compute_health, compute_health_sids, detect_strategy)
+                               compute_health, compute_health_sids, detect_strategy,
+                               find_win_cons)
 
     all_rows = [dict(r) for r in main_rows + cmd_rows]
     non_land_rows = [r for r in all_rows if 'Land' not in (r['type_line'] or '')]
+    win_cons = find_win_cons(all_rows)
+
+    # Role tags (Ramp/Removal/Card draw/etc.) for every card in the deck, keyed
+    # by deck_cards.id, so the same chips shown on suggestions can be shown on
+    # the deck's own rows — makes it obvious what a suggestion would replace.
+    card_tags = {
+        r['id']: role_tags(r['oracle_text'], r['type_line'], r['cmc'], r['power'], limit=None)
+        for r in main_rows + side_rows + cmd_rows
+    }
 
     strategy_key = deck['strategy'] or DEFAULT_STRATEGY
-    deck_health  = compute_health(all_rows, strategy_key, deck['format'] == 'commander', deck_format=deck['format'])
-    health_sids  = compute_health_sids(all_rows, strategy_key, deck_format=deck['format'])
+    commander_type_line = active_commander['type_line'] if active_commander else None
+    deck_health  = compute_health(all_rows, strategy_key, deck['format'] == 'commander',
+                                   deck_format=deck['format'], commander_type_line=commander_type_line)
+    health_sids  = compute_health_sids(all_rows, strategy_key, deck_format=deck['format'],
+                                        commander_type_line=commander_type_line)
     chart_health_sids = _json.dumps(health_sids)
 
     # ── Cut candidate scryfall IDs (for deck-view badges) ────────────────
@@ -856,6 +920,8 @@ def detail(deck_id):
                            deck_size=deck_size,
                            deck_health=deck_health,
                            chart_health_sids=chart_health_sids,
+                           card_tags=card_tags,
+                           win_cons=win_cons,
                            eligible_commanders=eligible_commanders,
                            active_commander=active_commander,
                            cut_sids=cut_sids,
@@ -1406,12 +1472,14 @@ def detect_strategy_route(deck_id):
         LEFT JOIN scryfall_bulk b ON dc.scryfall_id = b.scryfall_id
         WHERE dc.deck_id = ?
     ''', [deck_id]).fetchall()
-    cmd_row = db.execute(
-        "SELECT name FROM deck_cards WHERE deck_id=? AND board='commander' LIMIT 1",
-        [deck_id]
-    ).fetchone()
+    cmd_row = db.execute('''
+        SELECT dc.name, b.type_line FROM deck_cards dc
+        LEFT JOIN scryfall_bulk b ON dc.scryfall_id = b.scryfall_id
+        WHERE dc.deck_id=? AND dc.board='commander' LIMIT 1
+    ''', [deck_id]).fetchone()
     detection = detect_strategy([dict(r) for r in rows],
-                                 commander=cmd_row['name'] if cmd_row else None)
+                                 commander=cmd_row['name'] if cmd_row else None,
+                                 commander_type_line=cmd_row['type_line'] if cmd_row else None)
     save_detection(db, deck_id, detection)
     db.close()
     return jsonify(detection)
@@ -1662,24 +1730,21 @@ def auto_fill_preview(deck_id):
     if strategy_key not in STRATEGIES:
         strategy_key = DEFAULT_STRATEGY
 
-    # Check EDHREC cache exists
-    from app.edhrec import _name_to_slug
-    slug = _name_to_slug(cmd['name'])
-    has_edhrec = bool(db.execute('SELECT 1 FROM edhrec_cache WHERE slug=?', [slug]).fetchone())
-
-    result = None
-    error = None
-    if not has_edhrec:
-        error = f"No EDHREC data cached for {cmd['name']}. Use ⟳ EDHREC on the deck page first."
-    else:
-        result = auto_fill(db, deck_id, cmd['name'], color_identity, strategy_key)
+    # auto_fill() fetches and caches EDHREC data itself if we don't have it yet
+    # (or it's stale) — no manual "⟳ EDHREC" step required beforehand.
+    result = auto_fill(db, deck_id, cmd['name'], color_identity, strategy_key)
+    warning = None
+    if result['stats']['from_edhrec'] == 0 and result['stats']['owned_pool_size'] > 0:
+        warning = (f"No EDHREC synergy data found for {cmd['name']} — picks below aren't "
+                   f"synergy-ranked, just filled from your collection.")
 
     db.close()
     return render_template('decks/auto_fill.html',
                            deck=deck,
                            commander=cmd,
                            result=result,
-                           error=error,
+                           error=None,
+                           warning=warning,
                            strategies=STRATEGIES,
                            strategy_key=strategy_key,
                            format_label=FORMAT_LABELS.get(deck['format'], deck['format']))
@@ -1744,11 +1809,16 @@ def auto_fill_apply(deck_id):
 @decks_bp.route('/<int:deck_id>/combo-detail/<path:combo_id>')
 def combo_detail(deck_id, combo_id):
     from app.database import get_db
-    from app.edhrec import fetch_combo_detail
+    from app.edhrec import fetch_combo_detail, _name_to_slug
     from flask import jsonify as _jsonify
     db = get_db()
-    # Look up href from combo_cache
-    row = db.execute('SELECT combos_json FROM combo_cache WHERE slug IN (SELECT slug FROM combo_cache LIMIT 1)').fetchone()
+    commander = resolve_commander(db, deck_id)
+    if not commander:
+        db.close()
+        return _jsonify(error='no commander'), 404
+    slug = _name_to_slug(commander['name'])
+    # Look up href from this deck's commander's combo cache
+    row = db.execute('SELECT combos_json FROM combo_cache WHERE slug = ?', [slug]).fetchone()
     href = None
     if row:
         import json as _j
